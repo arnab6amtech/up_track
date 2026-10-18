@@ -11,6 +11,7 @@ const SOURCE_LABEL: Record<WorkbookSummary["sourceType"], string> = {
   drive: "Google Drive, read live",
   upload: "Uploaded file",
   local: "Local file",
+  captures: "Bugs reported with the browser extension",
 };
 
 export default function ImportPage() {
@@ -57,7 +58,7 @@ async function WorkbookList() {
             </Link>
             <p className="text-xs text-muted">
               {SOURCE_LABEL[w.sourceType]}
-              {w.builtIn ? " · set in server settings" : null}
+              {w.builtIn && w.sourceType !== "captures" ? " · set in server settings" : null}
               {w.createdAt && (
                 <>
                   {" · added "}
@@ -67,14 +68,16 @@ async function WorkbookList() {
             </p>
           </div>
           <div className="flex items-center gap-2">
-            <Link
-              href={`/import/${encodeURIComponent(w.id)}`}
-              className="rounded-md border border-line px-2.5 py-1 text-xs font-medium hover:border-accent"
-            >
-              Edit columns
-            </Link>
+            {w.sourceType !== "captures" && (
+              <Link
+                href={`/import/${encodeURIComponent(w.id)}`}
+                className="rounded-md border border-line px-2.5 py-1 text-xs font-medium hover:border-accent"
+              >
+                Edit columns
+              </Link>
+            )}
             {w.builtIn ? (
-              <span className="text-xs text-muted">Default</span>
+              <span className="text-xs text-muted">{w.sourceType === "captures" ? "Built in" : "Default"}</span>
             ) : (
               <RemoveWorkbookButton id={w.id} name={w.name} />
             )}

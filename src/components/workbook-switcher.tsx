@@ -9,6 +9,7 @@ const SOURCE_LABEL: Record<WorkbookSummary["sourceType"], string> = {
   drive: "Google Drive",
   upload: "Uploaded file",
   local: "Local file",
+  captures: "Browser extension",
 };
 
 export function WorkbookSwitcher({ workbooks }: { workbooks: WorkbookSummary[] }) {

@@ -28,7 +28,7 @@ export default function EditColumnsPage({ params }: PageProps<"/import/[id]">) {
 async function Editor({ params }: Pick<PageProps<"/import/[id]">, "params">) {
   const { id } = await params;
   const workbook = (await listWorkbooks()).find((w) => w.id === id);
-  if (!workbook) notFound();
+  if (!workbook || workbook.source.type === "captures") notFound();
 
   let tabs;
   try {

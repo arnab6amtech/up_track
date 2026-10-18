@@ -18,12 +18,12 @@ function readSeen(): boolean {
 
 const EXAMPLES = [
   "What's still open? Group it by module.",
-  "Fix bugs-17. Look at QA's screenshot first.",
+  "Fix UPT-12. Look at the screenshot first.",
   "Is the login timeout bug already fixed in this repo?",
 ];
 
 /** Floating button that tells people about the MCP server and how to hook up their coding agent. */
-export function McpGuide({ enabled, publicUrl }: { enabled: boolean; publicUrl: string | null }) {
+export function McpGuide({ publicUrl }: { publicUrl: string | null }) {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
   const [tab, setTab] = useState<"connect" | "use">("connect");
@@ -60,7 +60,7 @@ export function McpGuide({ enabled, publicUrl }: { enabled: boolean; publicUrl: 
 
   return (
     <div ref={root} className="fixed bottom-4 right-4 z-30 flex flex-col items-end gap-3">
-      {open && <Panel tab={tab} setTab={setTab} enabled={enabled} publicUrl={publicUrl} onClose={() => setOpen(false)} />}
+      {open && <Panel tab={tab} setTab={setTab} publicUrl={publicUrl} onClose={() => setOpen(false)} />}
 
       <button
         type="button"
@@ -86,13 +86,11 @@ export function McpGuide({ enabled, publicUrl }: { enabled: boolean; publicUrl: 
 function Panel({
   tab,
   setTab,
-  enabled,
   publicUrl,
   onClose,
 }: {
   tab: "connect" | "use";
   setTab: (t: "connect" | "use") => void;
-  enabled: boolean;
   publicUrl: string | null;
   onClose: () => void;
 }) {
@@ -135,16 +133,11 @@ function Panel({
       </header>
 
       <div className="flex-1 space-y-4 overflow-y-auto px-4 py-4 text-xs leading-relaxed">
-        {!enabled && (
-          <p className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-amber-900">
-            The MCP endpoint is turned off on this server. Ask an admin to set MCP_TOKENS first.
-          </p>
-        )}
 
         {tab === "connect" ? (
           <ol className="space-y-4">
             <Step n={1} title="Get your token">
-              <p>Ask whoever runs UpTrack for your personal token, then add it to your shell profile:</p>
+              <p>Create a token under <span className="font-medium">API tokens</span> (in your avatar menu), then add it to your shell profile:</p>
               <CopyBlock label="~/.zshrc" code="export UPTRACK_TOKEN=paste-your-token-here" />
             </Step>
             <Step n={2} title="Add UpTrack to your agent">
@@ -183,7 +176,7 @@ function Panel({
             </section>
             <section className="space-y-2">
               <h3 className="font-semibold">Or use the ready-made prompt</h3>
-              <CopyBlock label="Claude Code" code="/mcp__uptrack__fix-bug bugs-17" />
+              <CopyBlock label="Claude Code" code="/mcp__uptrack__fix-bug UPT-12" />
               <p className="text-muted">
                 In the VS Code extension it&apos;s listed as <code className="font-mono">/uptrack:fix-bug</code>. Add a
                 bug ID, a TC ID or a few words, or leave it empty to pick from the open bugs. It reads the bug, looks at
@@ -194,8 +187,7 @@ function Panel({
               <h3 className="font-semibold">Good to know</h3>
               <ul className="list-disc space-y-1 pl-4 text-muted">
                 <li>
-                  Each bug page has a Copy command button with its ID (the tab name plus row number, like{" "}
-                  <span className="font-mono">bugs-17</span>). Test case IDs work too, or just describe the bug.
+                  Each bug page has a Copy command button with its key (like <span className="font-mono">UPT-12</span>), or just describe the bug.
                 </li>
                 <li>The agent can read but not change the sheet. Update Dev Status yourself.</li>
                 <li>Videos can&apos;t be watched by the agent; it gets the link and a still frame where possible.</li>

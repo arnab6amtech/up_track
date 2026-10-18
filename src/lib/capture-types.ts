@@ -1,9 +1,5 @@
 /** Shapes shared by the capture API, the share page and the browser extension's uploads. */
 
-/** The built-in workbook that lists bugs reported with the browser extension. */
-export const CAPTURES_WORKBOOK_ID = "reported";
-export const CAPTURES_WORKBOOK_NAME = "Reported bugs";
-export const CAPTURES_TAB_SLUG = "reported";
 
 export interface NetworkEntry {
   type: "fetch" | "xhr";
@@ -48,50 +44,43 @@ export interface CaptureLog {
   console: ConsoleEntry[];
 }
 
-export interface CaptureMedia {
-  kind: "image" | "video";
-  file: string;
-  mime: string;
-  width?: number;
-  height?: number;
-  durationMs?: number;
-  /** Part of the recording viewers are shown; the full file is kept. */
-  trimStartMs?: number;
-  trimEndMs?: number;
-}
-
-export interface Capture {
-  /** Random and unguessable: it's the share link. */
-  id: string;
-  /** Sequential, for the bug list ("reported-12"). */
-  number: number;
-  createdAt: string;
-  reporter: string;
-  title: string;
-  description: string;
-  severity: string;
-  priority: string;
-  module: string;
-  status: string;
-  media: CaptureMedia[];
-  page: PageInfo;
-  counts: { requests: number; failedRequests: number; consoleErrors: number };
-}
-
-/** What the extension sends as the `meta` part of an upload. */
+/** What the extension sends as the `meta` part of an upload to /api/captures. */
 export interface CaptureUploadMeta {
+  projectId: string;
+  versionId: string;
+  componentId?: string;
   title: string;
   description?: string;
-  severity?: string;
-  priority?: string;
-  module?: string;
+  severity?: Severity;
+  priority?: Priority;
   page: PageInfo;
-  media: Omit<CaptureMedia, "file" | "mime">;
+  media: {
+    kind: "image" | "video";
+    width?: number;
+    height?: number;
+    durationMs?: number;
+    /** Part of a recording viewers are shown; the full file is kept. */
+    trimStartMs?: number;
+    trimEndMs?: number;
+  };
+}
+
+/** The projects a token's owner can report to, for the extension's pickers (GET /api/captures/projects). */
+export interface ReportableProject {
+  id: string;
+  key: string;
+  name: string;
+  organization: { slug: string; name: string };
+  versions: { id: string; name: string; status: string }[];
+  components: { id: string; name: string }[];
 }
 
 export const isFailed = (e: NetworkEntry) => e.status === 0 || e.status >= 400;
 
-export const SEVERITIES = ["Critical", "High", "Medium", "Low"] as const;
+export const SEVERITIES = ["critical", "high", "medium", "low"] as const;
+export const PRIORITIES = ["urgent", "high", "medium", "low"] as const;
+export type Severity = (typeof SEVERITIES)[number];
+export type Priority = (typeof PRIORITIES)[number];
 
 const BROWSERS: [string, RegExp][] = [
   ["Edge", /Edg\/(\d+)/],

@@ -52,9 +52,20 @@
 
       <aside class="panel">
         <form id="form" class="stack">
+          <div class="row">
+            <div class="field">
+              <label for="project">Project</label>
+              <select id="project" class="input" required></select>
+            </div>
+            <div class="field">
+              <label for="version">Found in version</label>
+              <select id="version" class="input" required></select>
+            </div>
+          </div>
+          <p id="projects-error" class="notice" hidden></p>
           <div class="field">
             <label for="title">Title</label>
-            <input id="title" class="input" maxlength="200" placeholder="What went wrong?" required />
+            <input id="title" class="input" maxlength="300" placeholder="What went wrong?" required />
           </div>
           <div class="field">
             <label for="description">Description <span class="muted">(optional)</span></label>
@@ -70,9 +81,9 @@
               <select id="priority" class="input"></select>
             </div>
           </div>
-          <div class="field">
+          <div class="field" id="module-field" hidden>
             <label for="module">Module <span class="muted">(optional)</span></label>
-            <input id="module" class="input" maxlength="120" placeholder="e.g. Checkout" />
+            <select id="module" class="input"></select>
           </div>
 
           <section class="log">

@@ -233,3 +233,9 @@ body {
   display: flex;
   gap: 6px;
 }
+
+.notice-action {
+  display: flex;
+  width: fit-content;
+  margin-top: 8px;
+}

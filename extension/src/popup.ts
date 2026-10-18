@@ -1,14 +1,14 @@
-import { ApiError, ping } from "./shared/api";
+import { ApiError, ping, SignInRequired } from "./shared/api";
 import { isRestricted } from "./shared/restricted";
-import { getSettings, normalizeServerUrl, saveSettings } from "./shared/settings";
+import { getSettings, normalizeServerUrl, saveSettings, signInUrl, type Settings } from "./shared/settings";
 import type { BackgroundMessage, RecordingState } from "./shared/types";
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
-const views = { setup: $("setup"), actions: $("actions"), recording: $("recording") };
+const views = { setup: $("setup"), signin: $("signin"), actions: $("actions"), recording: $("recording") };
 
 function show(view: keyof typeof views) {
   for (const [name, el] of Object.entries(views)) el.hidden = name !== view;
-  $("open-settings").hidden = view !== "actions";
+  $("open-settings").hidden = view !== "actions" && view !== "signin";
 }
 
 function showError(id: string, message: string | null) {
@@ -39,39 +39,44 @@ function showRecording(state: RecordingState) {
   timer = setInterval(tick, 500);
 }
 
-async function showActions() {
+function showSignIn(settings: Settings, reason?: string) {
+  show("signin");
+  $("signin-host").textContent = new URL(settings.serverUrl).host;
+  $("signin-reason").textContent = reason ?? "";
+  $("signin-reason").hidden = !reason || !settings.token;
+  $("signin-open").onclick = () => {
+    void chrome.tabs.create({ url: signInUrl(settings) });
+    window.close();
+  };
+}
+
+async function showActions(settings: Settings) {
   show("actions");
-  const settings = await getSettings();
   const tab = await activeTab();
   const restricted = isRestricted(tab?.url);
   $<HTMLButtonElement>("screenshot").disabled = restricted;
   $<HTMLButtonElement>("record").disabled = restricted;
   $("restricted").hidden = !restricted;
-  if (settings) {
-    // Show who the token belongs to; a failure here is shown when they actually capture.
-    ping(settings).then(
-      (name) => ($("connected").textContent = `Reporting as ${name} to ${new URL(settings.serverUrl).host}.`),
-      () => ($("connected").textContent = `Can't reach ${new URL(settings.serverUrl).host} right now.`),
-    );
-  }
-}
-
-/** The server address UpTrack wrote into the zip it was downloaded from, if any. */
-async function bundledServerUrl(): Promise<string> {
-  try {
-    const config = (await (await fetch(chrome.runtime.getURL("config.json"))).json()) as { serverUrl?: string };
-    return config.serverUrl ?? "";
-  } catch {
-    return "";
-  }
+  // Show who reports come from. Signed out: ask them to sign in before they capture anything.
+  ping(settings).then(
+    (who) => {
+      const orgs = who.organizations.length === 1 ? ` to ${who.organizations[0]}` : "";
+      $("connected").textContent = `Reporting as ${who.name}${orgs}.`;
+      $("token-note").hidden = !who.tokenRejected;
+    },
+    (err) => {
+      if (err instanceof SignInRequired) showSignIn(settings, err.message);
+      else $("connected").textContent = `Can't reach ${new URL(settings.serverUrl).host} right now.`;
+    },
+  );
 }
 
 async function showSetup() {
   show("setup");
   const settings = await getSettings();
-  $<HTMLInputElement>("server").value = settings?.serverUrl ?? (await bundledServerUrl());
+  $<HTMLInputElement>("server").value = settings?.serverUrl ?? "";
   $<HTMLInputElement>("token").value = settings?.token ?? "";
-  $<HTMLInputElement>(settings || $<HTMLInputElement>("server").value ? "token" : "server").focus();
+  $<HTMLInputElement>("server").focus();
 }
 
 $("settings-form").addEventListener("submit", async (e) => {
@@ -83,11 +88,17 @@ $("settings-form").addEventListener("submit", async (e) => {
   const button = $<HTMLButtonElement>("settings-save");
   button.disabled = true;
   button.textContent = "Connecting…";
+  const settings: Settings = token ? { serverUrl, token } : { serverUrl };
   try {
-    await ping({ serverUrl, token });
-    await saveSettings({ serverUrl, token });
-    await showActions();
+    await ping(settings);
+    await saveSettings(settings);
+    await showActions(settings);
   } catch (err) {
+    if (err instanceof SignInRequired && !token) {
+      // The address works; they just aren't signed in yet.
+      await saveSettings(settings);
+      return showSignIn(settings);
+    }
     showError("settings-error", err instanceof ApiError ? err.message : "Something went wrong. Try again.");
   } finally {
     button.disabled = false;
@@ -124,6 +135,7 @@ $("stop").addEventListener("click", async () => {
 (async () => {
   const state = await send<{ recording: RecordingState | null }>({ type: "state" });
   if (state.recording) return showRecording(state.recording);
-  if (await getSettings()) await showActions();
+  const settings = await getSettings();
+  if (settings) await showActions(settings);
   else await showSetup();
 })();

@@ -1,10 +1,10 @@
 // Editor tab: annotate the screenshot (or trim the recording), describe the bug and upload it to UpTrack.
 
 import { Annotator, type Tool } from "./annotate";
-import { ApiError, upload } from "./shared/api";
+import { ApiError, fetchProjects, SignInRequired, upload } from "./shared/api";
 import { deleteDraft, getDraft } from "./shared/drafts";
-import { getSettings } from "./shared/settings";
-import { isFailed, SEVERITIES, type CaptureLog, type Draft } from "./shared/types";
+import { getSettings, signInUrl } from "./shared/settings";
+import { isFailed, PRIORITIES, SEVERITIES, type CaptureLog, type Draft, type ReportableProject } from "./shared/types";
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const COLORS = ["#e11d48", "#f97316", "#facc15", "#16a34a", "#2563eb", "#0a0a0a"];
@@ -27,13 +27,92 @@ function formatTime(ms: number) {
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 }
 
-function fillSelect(id: string, options: readonly string[], selected: string) {
+const capitalize = (value: string) => value[0].toUpperCase() + value.slice(1);
+
+function fillSelect(id: string, options: { value: string; label: string }[], selected: string) {
   const select = $<HTMLSelectElement>(id);
-  for (const value of ["", ...options]) {
-    const option = new Option(value || "Not set", value, false, value === selected);
-    select.add(option);
-  }
+  select.replaceChildren(...options.map((o) => new Option(o.label, o.value, false, o.value === selected)));
 }
+
+// ---- Project and version pickers ----
+
+let projects: ReportableProject[] = [];
+const LAST_CHOICE = "lastReportTarget";
+
+function showVersions(projectId: string, preferredVersionId?: string) {
+  const project = projects.find((p) => p.id === projectId);
+  const versions = project?.versions ?? [];
+  // Default to what the reporter used last, else whatever QA is testing now.
+  const pick = versions.find((v) => v.id === preferredVersionId) ?? versions.find((v) => v.status === "in_testing") ?? versions[0];
+  fillSelect(
+    "version",
+    versions.map((v) => ({ value: v.id, label: `${v.name}${v.status === "in_testing" ? " (in testing)" : ""}` })),
+    pick?.id ?? "",
+  );
+  const modules = project?.components ?? [];
+  $("module-field").hidden = modules.length === 0;
+  fillSelect("module", [{ value: "", label: "None" }, ...modules.map((c) => ({ value: c.id, label: c.name }))], "");
+}
+
+/** Projects in a picker, grouped by organization when the reporter belongs to several. */
+function fillProjects(selected: string) {
+  const select = $<HTMLSelectElement>("project");
+  const option = (p: ReportableProject) => new Option(`${p.name} (${p.key})`, p.id, false, p.id === selected);
+  const orgs = [...new Set(projects.map((p) => p.organization.name))];
+  if (orgs.length < 2) return select.replaceChildren(...projects.map(option));
+  select.replaceChildren(
+    ...orgs.map((name) => {
+      const group = document.createElement("optgroup");
+      group.label = name;
+      group.append(...projects.filter((p) => p.organization.name === name).map(option));
+      return group;
+    }),
+  );
+}
+
+const NO_SERVER = "Set up UpTrack first: open the extension's menu and enter your UpTrack address.";
+
+/** Explains why reporting can't continue; offers sign-in when that's the reason. */
+function blockProjects(message: string, signIn?: string) {
+  const notice = $("projects-error");
+  notice.replaceChildren(message);
+  if (signIn) {
+    const link = Object.assign(document.createElement("a"), { href: signIn, target: "_blank", textContent: "Sign in to UpTrack" });
+    link.className = "btn btn-primary btn-sm notice-action";
+    notice.append(link);
+  }
+  notice.hidden = false;
+  $<HTMLButtonElement>("submit").disabled = true;
+}
+
+let projectsReady = false;
+
+async function loadProjects() {
+  const settings = await getSettings();
+  if (!settings) return blockProjects(NO_SERVER);
+  try {
+    projects = (await fetchProjects(settings)).filter((p) => p.versions.length > 0);
+  } catch (err) {
+    if (err instanceof SignInRequired) return blockProjects(err.message, signInUrl(settings));
+    return blockProjects(err instanceof ApiError ? err.message : "Couldn't load your projects.");
+  }
+  if (projects.length === 0) {
+    return blockProjects("You aren't on any project with an active version you can report to. Ask a project manager to add you.");
+  }
+  $("projects-error").hidden = true;
+  $<HTMLButtonElement>("submit").disabled = !$("load-error").hidden;
+  projectsReady = true;
+  const last = ((await chrome.storage.local.get(LAST_CHOICE))[LAST_CHOICE] ?? {}) as { projectId?: string; versionId?: string };
+  const projectId = projects.some((p) => p.id === last.projectId) ? last.projectId! : projects[0].id;
+  fillProjects(projectId);
+  showVersions(projectId, last.versionId);
+}
+
+$<HTMLSelectElement>("project").addEventListener("change", (e) => showVersions((e.target as HTMLSelectElement).value));
+// Coming back after signing in (or being added to a project) in another tab: try again.
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible" && !projectsReady) void loadProjects();
+});
 
 // ---- Screenshot annotation ----
 
@@ -141,7 +220,7 @@ $("form").addEventListener("submit", async (e) => {
   error.hidden = true;
   const settings = await getSettings();
   if (!settings) {
-    error.textContent = "Connect to UpTrack first: open the extension's menu and enter the address and your token.";
+    error.textContent = NO_SERVER;
     error.hidden = false;
     return;
   }
@@ -159,9 +238,11 @@ $("form").addEventListener("submit", async (e) => {
     const meta = {
       title: $<HTMLInputElement>("title").value.trim(),
       description: $<HTMLTextAreaElement>("description").value.trim(),
+      projectId: $<HTMLSelectElement>("project").value,
+      versionId: $<HTMLSelectElement>("version").value,
+      componentId: $<HTMLSelectElement>("module").value || undefined,
       severity: $<HTMLSelectElement>("severity").value,
       priority: $<HTMLSelectElement>("priority").value,
-      module: $<HTMLInputElement>("module").value.trim(),
       // Page details can be missing when the tab closed before a recording finished.
       page: draft.page ?? {
         url: "unknown",
@@ -190,12 +271,13 @@ $("form").addEventListener("submit", async (e) => {
     const result = await upload(settings, form, (f) => ($("progress-bar").style.width = `${Math.round(f * 100)}%`));
     submitted = true;
     await deleteDraft(draft.id).catch(() => {});
+    await chrome.storage.local.set({ [LAST_CHOICE]: { projectId: meta.projectId, versionId: meta.versionId } });
 
     $("form").hidden = true;
     $("done").hidden = false;
-    $("done-sub").textContent = `Added to UpTrack as reported bug #${result.number}.`;
+    $("done-sub").textContent = `Added to UpTrack as ${result.key}.`;
     $<HTMLInputElement>("share").value = result.shareUrl;
-    $<HTMLInputElement>("fix").value = `/uptrack:fix-bug reported-${result.number} reported`;
+    $<HTMLInputElement>("fix").value = result.fixCommand;
     $<HTMLAnchorElement>("open-bug").href = result.bugUrl;
   } catch (err) {
     error.textContent = err instanceof ApiError ? err.message : `Something went wrong: ${String(err)}`;
@@ -225,8 +307,9 @@ window.addEventListener("beforeunload", (e) => {
 // ---- Start ----
 
 (async () => {
-  fillSelect("severity", SEVERITIES, "");
-  fillSelect("priority", ["High", "Medium", "Low"], "");
+  fillSelect("severity", SEVERITIES.map((v) => ({ value: v, label: capitalize(v) })), "medium");
+  fillSelect("priority", PRIORITIES.map((v) => ({ value: v, label: capitalize(v) })), "medium");
+  const projectsLoaded = loadProjects();
   const id = new URLSearchParams(location.search).get("draft");
   const found = id ? await getDraft(id) : undefined;
   if (!found) return fail("This capture isn't available any more. Take a new screenshot or recording from the extension.");
@@ -239,5 +322,6 @@ window.addEventListener("beforeunload", (e) => {
   showLog(draft.log);
   if (draft.kind === "image") await setUpImage();
   else setUpVideo();
+  await projectsLoaded;
   $<HTMLInputElement>("title").focus();
 })();

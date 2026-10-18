@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>UpTrack</title>
+    <link rel="stylesheet" href="ui.css" />
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <header class="head">
+      <span class="logo">U</span>
+      <strong>UpTrack</strong>
+      <button type="button" id="open-settings" class="btn btn-sm head-settings" hidden>Settings</button>
+    </header>
+
+    <section id="setup" class="body" hidden>
+      <p class="small muted">Connect to your UpTrack server to report bugs. Ask whoever runs it for the address and your personal token.</p>
+      <form id="settings-form" class="stack">
+        <div class="field">
+          <label for="server">UpTrack address</label>
+          <input id="server" class="input" placeholder="https://uptrack.yourcompany.com" autocomplete="url" required />
+        </div>
+        <div class="field">
+          <label for="token">Your token</label>
+          <input id="token" class="input mono" type="password" placeholder="paste-your-token-here" autocomplete="off" required />
+        </div>
+        <p id="settings-error" class="error" hidden></p>
+        <button type="submit" class="btn btn-primary" id="settings-save">Save and connect</button>
+      </form>
+    </section>
+
+    <section id="actions" class="body" hidden>
+      <button type="button" class="choice" id="screenshot">
+        <span class="choice-title">Screenshot</span>
+        <span class="choice-sub">The visible part of this page. Annotate it next.</span>
+      </button>
+      <button type="button" class="choice" id="record">
+        <span class="choice-title">Record this tab</span>
+        <span class="choice-sub">Up to 5 minutes. Stop from this menu.</span>
+      </button>
+      <p id="restricted" class="notice" hidden>Chrome doesn't allow capturing this page. Switch to the site you're testing.</p>
+      <p id="action-error" class="error" hidden></p>
+      <p class="small muted foot">Each report includes the page's API calls and console errors.<br /><span id="connected"></span></p>
+    </section>
+
+    <section id="recording" class="body" hidden>
+      <p class="rec"><span class="rec-dot"></span> Recording <span id="timer" class="mono">0:00</span></p>
+      <button type="button" class="btn btn-primary" id="stop">Stop and review</button>
+      <p class="small muted">Reproduce the bug in the tab now. The API calls it makes are recorded too.</p>
+    </section>
+
+    <script src="popup.js"></script>
+  </body>
+</html>

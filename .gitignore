@@ -43,3 +43,6 @@ next-env.d.ts
 
 # local sheet copy for development
 /data
+
+# built browser extension (npm run ext:build)
+/extension/dist

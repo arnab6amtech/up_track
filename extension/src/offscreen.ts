@@ -1,0 +1,80 @@
+// Offscreen document: MV3 service workers can't record media, so the tab recording happens here.
+
+import fixWebmDuration from "fix-webm-duration";
+import { saveDraft } from "./shared/drafts";
+import type { OffscreenMessage } from "./shared/types";
+
+let recorder: MediaRecorder | null = null;
+let stream: MediaStream | null = null;
+let chunks: Blob[] = [];
+let startedAt = 0;
+let stopTimer: ReturnType<typeof setTimeout> | undefined;
+
+chrome.runtime.onMessage.addListener((message: OffscreenMessage, _sender, sendResponse) => {
+  if (message?.target !== "offscreen") return false;
+  if (message.type === "start") {
+    start(message.streamId, message.maxMs).then(
+      () => sendResponse({ ok: true }),
+      (err: unknown) => sendResponse({ ok: false, error: err instanceof Error ? err.message : String(err) }),
+    );
+    return true;
+  }
+  stop();
+  sendResponse({ ok: true });
+  return false;
+});
+
+function stop() {
+  if (recorder?.state === "recording") recorder.stop();
+}
+
+async function start(streamId: string, maxMs: number) {
+  stream = await navigator.mediaDevices.getUserMedia({
+    audio: false,
+    // Chrome's tab-capture constraints aren't in the standard typings.
+    video: { mandatory: { chromeMediaSource: "tab", chromeMediaSourceId: streamId, maxFrameRate: 30 } } as MediaTrackConstraints,
+  });
+  const mimeType = ["video/webm;codecs=vp9", "video/webm;codecs=vp8", "video/webm"].find((t) => MediaRecorder.isTypeSupported(t));
+  recorder = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 2_500_000 });
+  chunks = [];
+  recorder.ondataavailable = (e) => {
+    if (e.data.size) chunks.push(e.data);
+  };
+  recorder.onstop = () => void finish();
+  // Stop if the tab goes away or Chrome ends the capture.
+  stream.getVideoTracks()[0]?.addEventListener("ended", stop);
+  startedAt = performance.now();
+  recorder.start(1000);
+  stopTimer = setTimeout(stop, maxMs);
+}
+
+async function finish() {
+  clearTimeout(stopTimer);
+  const durationMs = Math.round(performance.now() - startedAt);
+  const settings = stream?.getVideoTracks()[0]?.getSettings();
+  stream?.getTracks().forEach((t) => t.stop());
+  try {
+    // MediaRecorder leaves the duration out of WebM files, which stops players from seeking.
+    const blob = await fixWebmDuration(new Blob(chunks, { type: "video/webm" }), durationMs, { logger: false });
+    const id = crypto.randomUUID();
+    await saveDraft({
+      id,
+      kind: "video",
+      blob,
+      width: settings?.width,
+      height: settings?.height,
+      durationMs,
+      log: { network: [], console: [] },
+      page: null,
+      logAvailable: false,
+      createdAt: Date.now(),
+    });
+    await chrome.runtime.sendMessage({ type: "recording-done", draftId: id });
+  } catch (err) {
+    await chrome.runtime.sendMessage({ type: "recording-failed", error: String(err) });
+  } finally {
+    chunks = [];
+    recorder = null;
+    stream = null;
+  }
+}

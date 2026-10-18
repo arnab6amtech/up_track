@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { deleteWorkbook } from "@/app/actions";
+import { deleteWorkbook } from "@/app/sheets/actions";
 
 export function RemoveWorkbookButton({ id, name }: { id: string; name: string }) {
   const [pending, startTransition] = useTransition();

@@ -2,20 +2,17 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Suspense } from "react";
 import { AgentCommandBar } from "@/components/agent-command";
-import { CaptureDetails } from "@/components/capture-details";
 import { KeyNav } from "@/components/key-nav";
 import { MediaGallery } from "@/components/media-gallery";
 import { RichText } from "@/components/rich-text";
-import { ShareLinkBar } from "@/components/share-link";
 import { SheetErrorPanel } from "@/components/sheet-error";
 import { StatusBadge } from "@/components/status-badge";
-import { getCapture } from "@/lib/captures";
 import { getSheetData, getWorkbooks, pickWorkbook } from "@/lib/data";
 import { filterRecords, filtersToQuery, PAGE_SIZE, parseFilters } from "@/lib/filters";
-import { publicOrigin } from "@/lib/origin";
 import type { BugRecord } from "@/lib/types";
+import { requireUser } from "@/server/auth/session";
 
-export default function BugPage({ params, searchParams }: PageProps<"/bug/[id]">) {
+export default function BugPage({ params, searchParams }: PageProps<"/sheets/bug/[id]">) {
   return (
     <Suspense fallback={<DetailSkeleton />}>
       <BugDetail params={params} searchParams={searchParams} />
@@ -23,7 +20,8 @@ export default function BugPage({ params, searchParams }: PageProps<"/bug/[id]">
   );
 }
 
-async function BugDetail({ params, searchParams }: Pick<PageProps<"/bug/[id]">, "params" | "searchParams">) {
+async function BugDetail({ params, searchParams }: Pick<PageProps<"/sheets/bug/[id]">, "params" | "searchParams">) {
+  await requireUser("/sheets");
   const [workbooks, { id }, sp] = await Promise.all([getWorkbooks(), params, searchParams]);
   let f = parseFilters(sp);
   const workbook = pickWorkbook(workbooks, f.wb);
@@ -46,14 +44,11 @@ async function BugDetail({ params, searchParams }: Pick<PageProps<"/bug/[id]">, 
   }
   const query = filtersToQuery(f, { page: 1 });
   const listPage = Math.floor(index / PAGE_SIZE) + 1;
-  const backHref = `/${filtersToQuery(f, { page: listPage })}`;
-  const prevHref = index > 0 ? `/bug/${list[index - 1].id}${query}` : undefined;
-  const nextHref = index < list.length - 1 ? `/bug/${list[index + 1].id}${query}` : undefined;
+  const backHref = `/sheets${filtersToQuery(f, { page: listPage })}`;
+  const prevHref = index > 0 ? `/sheets/bug/${list[index - 1].id}${query}` : undefined;
+  const nextHref = index < list.length - 1 ? `/sheets/bug/${list[index + 1].id}${query}` : undefined;
 
   const isIssue = record.kind === "issue";
-  // Bugs reported with the extension carry their own description, environment and API log.
-  const capture = record.capture ? await getCapture(record.capture.id) : null;
-  const origin = capture ? await publicOrigin() : "";
   const ref = isIssue ? `Row ${record.row}` : record.testCaseId || `Row ${record.row}`;
 
   return (
@@ -122,16 +117,11 @@ async function BugDetail({ params, searchParams }: Pick<PageProps<"/bug/[id]">, 
               {record.sl && <Meta label="SL">{record.sl}</Meta>}
             </dl>
             <AgentCommandBar id={record.id} workbook={workbook.id === workbooks[0].id ? undefined : workbook.id} />
-            {capture && <ShareLinkBar url={`${origin}/c/${capture.id}`} />}
           </header>
 
-          {capture ? (
-            <CaptureDetails capture={capture} />
-          ) : (
-            <div className="grid gap-4 xl:grid-cols-2">
-              {isIssue ? <IssueBody record={record} /> : <TestCaseBody record={record} />}
-            </div>
-          )}
+          <div className="grid gap-4 xl:grid-cols-2">
+            {isIssue ? <IssueBody record={record} /> : <TestCaseBody record={record} />}
+          </div>
 
           <footer className="flex flex-wrap items-center justify-between gap-2 border-t border-line pt-4 text-xs text-muted">
             <span>

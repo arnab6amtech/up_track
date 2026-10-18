@@ -2,7 +2,7 @@
 
 import { useSearchParams } from "next/navigation";
 import { useTransition } from "react";
-import { refreshSheet } from "@/app/actions";
+import { refreshSheet } from "@/app/sheets/actions";
 
 export function RefreshButton() {
   const [pending, startTransition] = useTransition();

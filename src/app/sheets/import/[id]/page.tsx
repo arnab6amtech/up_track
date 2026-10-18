@@ -6,14 +6,15 @@ import { SheetErrorPanel } from "@/components/sheet-error";
 import { analyzeWorkbook } from "@/lib/parse";
 import { loadWorkbookFile } from "@/lib/source";
 import { getMapping, listWorkbooks } from "@/lib/workbooks";
+import { requireUser } from "@/server/auth/session";
 
 export const metadata = { title: "Edit columns — UpTrack" };
 
-export default function EditColumnsPage({ params }: PageProps<"/import/[id]">) {
+export default function EditColumnsPage({ params }: PageProps<"/sheets/import/[id]">) {
   return (
     <div className="mx-auto max-w-3xl space-y-6">
       <Link
-        href="/import#workbooks"
+        href="/sheets/import#workbooks"
         className="inline-block rounded-md border border-line px-3 py-1.5 text-xs font-medium hover:border-accent"
       >
         Back to workbooks
@@ -25,10 +26,11 @@ export default function EditColumnsPage({ params }: PageProps<"/import/[id]">) {
   );
 }
 
-async function Editor({ params }: Pick<PageProps<"/import/[id]">, "params">) {
+async function Editor({ params }: Pick<PageProps<"/sheets/import/[id]">, "params">) {
+  await requireUser("/sheets");
   const { id } = await params;
   const workbook = (await listWorkbooks()).find((w) => w.id === id);
-  if (!workbook || workbook.source.type === "captures") notFound();
+  if (!workbook) notFound();
 
   let tabs;
   try {

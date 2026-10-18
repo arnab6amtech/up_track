@@ -9,7 +9,6 @@ const SOURCE_LABEL: Record<WorkbookSummary["sourceType"], string> = {
   drive: "Google Drive",
   upload: "Uploaded file",
   local: "Local file",
-  captures: "Browser extension",
 };
 
 export function WorkbookSwitcher({ workbooks }: { workbooks: WorkbookSummary[] }) {
@@ -32,7 +31,7 @@ export function WorkbookSwitcher({ workbooks }: { workbooks: WorkbookSummary[] }
 
   if (workbooks.length === 0) {
     return (
-      <Link href="/import" className="rounded-md border border-line px-3 py-1.5 text-xs font-medium hover:border-accent">
+      <Link href="/sheets/import" className="rounded-md border border-line px-3 py-1.5 text-xs font-medium hover:border-accent">
         Import sheet
       </Link>
     );
@@ -60,7 +59,7 @@ export function WorkbookSwitcher({ workbooks }: { workbooks: WorkbookSummary[] }
               return (
                 <li key={w.id}>
                   <Link
-                    href={i === 0 ? "/" : `/?wb=${encodeURIComponent(w.id)}`}
+                    href={i === 0 ? "/sheets" : `/sheets?wb=${encodeURIComponent(w.id)}`}
                     onClick={() => setOpen(false)}
                     className={`flex items-center gap-3 px-3 py-2 text-sm hover:bg-surface-2 ${active ? "font-medium" : ""}`}
                   >
@@ -79,14 +78,14 @@ export function WorkbookSwitcher({ workbooks }: { workbooks: WorkbookSummary[] }
           </ul>
           <div className="flex gap-2 border-t border-line p-2">
             <Link
-              href="/import"
+              href="/sheets/import"
               onClick={() => setOpen(false)}
               className="flex-1 rounded-md bg-accent px-3 py-1.5 text-center text-xs font-medium text-white hover:bg-neutral-800"
             >
               Import sheet
             </Link>
             <Link
-              href="/import#workbooks"
+              href="/sheets/import#workbooks"
               onClick={() => setOpen(false)}
               className="rounded-md border border-line px-3 py-1.5 text-xs font-medium hover:border-accent"
             >

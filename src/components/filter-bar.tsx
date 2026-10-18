@@ -31,7 +31,7 @@ export function FilterBar({ filters, fields }: { filters: Filters; fields: Filte
   }
 
   const go = (overrides: Partial<Filters>) =>
-    startTransition(() => router.push(`/${filtersToQuery(filters, { ...overrides, page: 1 })}`, { scroll: false }));
+    startTransition(() => router.push(`/sheets${filtersToQuery(filters, { ...overrides, page: 1 })}`, { scroll: false }));
 
   // Debounced search so each keystroke doesn't trigger a server render.
   useEffect(() => {
@@ -39,7 +39,7 @@ export function FilterBar({ filters, fields }: { filters: Filters; fields: Filte
     if (next === pushedQ) return;
     const t = setTimeout(() => {
       setPushedQ(next);
-      startTransition(() => router.replace(`/${filtersToQuery(filters, { q: next, page: 1 })}`, { scroll: false }));
+      startTransition(() => router.replace(`/sheets${filtersToQuery(filters, { q: next, page: 1 })}`, { scroll: false }));
     }, 300);
     return () => clearTimeout(t);
   }, [q, pushedQ, filters, router]);

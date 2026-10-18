@@ -4,6 +4,7 @@ import { updateTag } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { getWorkbooks, pickWorkbook, WORKBOOKS_TAG, workbookTag } from "@/lib/data";
+import { requireUser } from "@/server/auth/session";
 import { FIELDS, type MappedField, type WorkbookMapping } from "@/lib/mapping";
 import { analyzeWorkbook, parseWorkbook, type TabAnalysis } from "@/lib/parse";
 import { loadWorkbookFile } from "@/lib/source";
@@ -21,6 +22,7 @@ import {
 
 /** Drops the cached copy of a workbook so the next render reads it again. */
 export async function refreshSheet(wb: string) {
+  await requireUser("/sheets");
   const workbook = pickWorkbook(await getWorkbooks(), wb);
   if (workbook) updateTag(workbookTag(workbook.id));
 }
@@ -50,6 +52,7 @@ function driveError(err: unknown): string {
 
 /** Step 1 of importing: read the file or link and guess its columns. Nothing is saved as a workbook yet. */
 export async function analyzeImport(_prev: AnalyzeState, form: FormData): Promise<AnalyzeState> {
+  await requireUser("/sheets");
   const mode = form.get("mode");
   try {
     if (mode === "upload") {
@@ -136,6 +139,7 @@ function readPayload<T extends z.ZodType>(form: FormData, schema: T): z.infer<T>
 
 /** Step 2 of importing: save the workbook with the columns the user confirmed. */
 export async function confirmImport(_prev: SaveState, form: FormData): Promise<SaveState> {
+  await requireUser("/sheets");
   const payload = readPayload(
     form,
     z.object({ source: sourceSchema, name: z.string().max(80), mapping: mappingSchema }),
@@ -166,17 +170,17 @@ export async function confirmImport(_prev: SaveState, form: FormData): Promise<S
   }
 
   updateTag(WORKBOOKS_TAG);
-  redirect(`/?wb=${encodeURIComponent(id)}`);
+  redirect(`/sheets?wb=${encodeURIComponent(id)}`);
 }
 
 /** Saves edited columns for an existing workbook. */
 export async function saveColumns(_prev: SaveState, form: FormData): Promise<SaveState> {
+  await requireUser("/sheets");
   const payload = readPayload(form, z.object({ id: z.string().max(100), mapping: mappingSchema }));
   if (!payload) return { error: "Something went wrong reading your choices. Please try again." };
   const workbooks = await listWorkbooks();
   const workbook = workbooks.find((w) => w.id === payload.id);
   if (!workbook) return { error: "That workbook no longer exists." };
-  if (workbook.source.type === "captures") return { error: "Reported bugs have no columns to map." };
 
   try {
     const file = await loadWorkbookFile(workbook.source);
@@ -188,10 +192,11 @@ export async function saveColumns(_prev: SaveState, form: FormData): Promise<Sav
   }
 
   updateTag(workbookTag(workbook.id));
-  redirect(workbook.id === workbooks[0]?.id ? "/" : `/?wb=${encodeURIComponent(workbook.id)}`);
+  redirect(workbook.id === workbooks[0]?.id ? "/sheets" : `/sheets?wb=${encodeURIComponent(workbook.id)}`);
 }
 
 export async function deleteWorkbook(id: string): Promise<SaveState> {
+  await requireUser("/sheets");
   try {
     await removeWorkbook(id);
   } catch (err) {

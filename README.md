@@ -39,6 +39,27 @@ Links are collected from cell hyperlinks and from URLs written in the reference,
 
 Viewers only see Drive files that are shared with them, or shared as "anyone with the link".
 
+## Browser extension
+
+`extension/` holds a Chrome, Edge and Brave extension (Manifest V3) for reporting bugs straight from the page, in the spirit of jam.dev:
+
+- **Screenshot** of the visible page, marked up with arrows, boxes, text and blur. Blur hides private details before upload.
+- **Record this tab** for up to 5 minutes, then trim it to the part viewers should see. The full recording is kept.
+- **API log:** from page load, the extension records the page's `fetch`/XHR calls (method, URL, status, timing, headers, bodies up to 20 KB) and its console errors and uncaught exceptions. Authorization headers, cookies, and fields or query parameters named like passwords, tokens, secrets or API keys are replaced with `[hidden by UpTrack]` before anything leaves the browser. Calls made by workers or other sites' iframes aren't seen.
+- **Create bug** uploads it to UpTrack. Each report gets a public share link, `/c/<id>`, with the media, page and browser details, and a filterable API and console log. It's added to the built-in **Reported bugs** workbook, where the AI agent can read it: `get_bug` lists the failed calls, and `get_bug_logs` returns the full requests and responses.
+
+Install it from the app's **Extension** page: download the zip, which already contains this server's address, then use **Load unpacked** in `chrome://extensions`. The extension uses the same personal tokens as MCP (`MCP_TOKENS`). Reports are stored next to imports, in `data/workbooks/captures/`.
+
+Development:
+
+```bash
+npm run ext:build   # build into extension/dist (npm run build does this too)
+npm run ext:watch   # rebuild on change; static files are copied once at start
+npm run ext:check   # type-check the extension
+```
+
+The share link is unguessable but public: anyone with it can see the report. Don't paste share links anywhere public.
+
 ## Coding agents (MCP)
 
 UpTrack is also an MCP server at `/api/mcp`. A coding agent such as Claude Code, Cursor or VS Code Copilot can use it to read QA's bugs and see their screenshots while it works in your codebase. The **Connect agent** page and the floating **Use with your AI agent** button have copy-ready setup.

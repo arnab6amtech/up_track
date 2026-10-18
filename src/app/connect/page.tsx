@@ -1,7 +1,7 @@
-import { headers } from "next/headers";
 import { Suspense } from "react";
 import { CopyBlock } from "@/components/copy-block";
 import { mcpEnabled } from "@/lib/mcp/auth";
+import { publicOrigin } from "@/lib/origin";
 
 export const metadata = { title: "Connect your agent — UpTrack" };
 
@@ -31,10 +31,7 @@ export default function ConnectPage() {
 }
 
 async function Setup() {
-  const h = await headers();
-  const origin =
-    process.env.PUBLIC_URL?.trim().replace(/\/$/, "") ||
-    `${h.get("x-forwarded-proto") ?? "http"}://${h.get("x-forwarded-host") ?? h.get("host")}`;
+  const origin = await publicOrigin();
   const url = `${origin}/api/mcp`;
 
   const mcpJson = JSON.stringify(

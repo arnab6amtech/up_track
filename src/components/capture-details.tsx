@@ -8,7 +8,10 @@ export function attachmentUrl(id: string, shareToken?: string) {
 }
 
 /** Screenshots and recordings as gallery items (the API log is shown separately). */
-export function mediaLinks(attachments: Attachment[], shareToken?: string): MediaLink[] {
+export function mediaLinks(
+  attachments: Pick<Attachment, "id" | "kind" | "fileName" | "trimStartMs" | "trimEndMs">[],
+  shareToken?: string,
+): MediaLink[] {
   return attachments
     .filter((a) => a.kind === "image" || a.kind === "video")
     .map((a) => {

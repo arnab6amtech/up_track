@@ -26,14 +26,13 @@ export function ReferenceButton({ media, title, refLabel, href }: Props) {
         type="button"
         onClick={() => setOpen(true)}
         title={`View ${media.length} reference ${media.length === 1 ? "file" : "files"}`}
-        className="relative z-10 inline-flex items-center gap-2 rounded-lg border border-line bg-surface py-1 pl-1 pr-2.5 shadow-xs transition hover:border-accent hover:shadow-sm"
+        className="relative z-10 inline-flex items-center rounded-lg border border-line bg-surface p-1 shadow-xs transition hover:border-accent hover:shadow-sm"
       >
         <span className="flex -space-x-3">
           {tiles.map((m) => (
             <Tile key={m.url} item={m} />
           ))}
         </span>
-        <span className="text-xs font-semibold tabular-nums">{media.length}</span>
       </button>
       {open && (
         <ReferenceDrawer media={media} title={title} refLabel={refLabel} href={href} onClose={() => setOpen(false)} />

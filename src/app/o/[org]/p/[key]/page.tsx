@@ -1,11 +1,13 @@
 import Link from "next/link";
 import { Suspense } from "react";
 import { CopyFixButton } from "@/components/agent-command";
-import { PriorityBadge, SeverityBadge, StatusPill } from "@/components/tracker-badges";
+import { mediaLinks } from "@/components/capture-details";
+import { ReferenceButton } from "@/components/reference-drawer";
+import { SeverityBadge, StatusPill } from "@/components/tracker-badges";
 import { TrackerFilters, type FilterSelect } from "@/components/tracker-filters";
-import { PRIORITY_LABEL, RESOLUTION_LABEL, SEVERITY_LABEL } from "@/lib/labels";
+import { RESOLUTION_LABEL, SEVERITY_LABEL } from "@/lib/labels";
 import { getOrgContext, getProjectAccess } from "@/server/access";
-import { BUGS_PAGE_SIZE, listBugs, listStatuses, PRIORITIES, SEVERITIES, type BugFilters } from "@/server/bugs";
+import { BUGS_PAGE_SIZE, listBugs, listStatuses, SEVERITIES, type BugFilters, type BugListItem } from "@/server/bugs";
 import { listComponents, listProjectMembers, listVersions } from "@/server/projects";
 
 export default function ProjectBugsPage({ params, searchParams }: PageProps<"/o/[org]/p/[key]">) {
@@ -32,7 +34,6 @@ async function ProjectBugs({ params, searchParams }: Pick<PageProps<"/o/[org]/p/
     component: param(sp.component),
     assignee: param(sp.assignee),
     severity: param(sp.severity),
-    priority: param(sp.priority),
     sort: param(sp.sort) || "updated",
   };
   const page = Math.max(1, Number(param(sp.page)) || 1);
@@ -61,9 +62,7 @@ async function ProjectBugs({ params, searchParams }: Pick<PageProps<"/o/[org]/p/
       ],
     },
     { name: "version", label: "Version", options: [{ value: "", label: "All" }, ...versions.map((v) => ({ value: v.id, label: v.name }))] },
-    ...(components.length
-      ? [{ name: "component", label: "Module", options: [{ value: "", label: "All" }, ...components.map((c) => ({ value: c.id, label: c.name }))] }]
-      : []),
+    { name: "component", label: "Feature", options: [{ value: "", label: "All" }, ...components.map((c) => ({ value: c.id, label: c.name }))] },
     {
       name: "assignee",
       label: "Assignee",
@@ -75,7 +74,6 @@ async function ProjectBugs({ params, searchParams }: Pick<PageProps<"/o/[org]/p/
       ],
     },
     { name: "severity", label: "Severity", options: [{ value: "", label: "All" }, ...SEVERITIES.map((s) => ({ value: s, label: SEVERITY_LABEL[s] }))] },
-    { name: "priority", label: "Priority", options: [{ value: "", label: "All" }, ...PRIORITIES.map((s) => ({ value: s, label: PRIORITY_LABEL[s] }))] },
     {
       name: "sort",
       label: "Sort",
@@ -83,7 +81,7 @@ async function ProjectBugs({ params, searchParams }: Pick<PageProps<"/o/[org]/p/
       options: [
         { value: "updated", label: "Recently updated" },
         { value: "created", label: "Newest" },
-        { value: "priority", label: "Priority" },
+        { value: "severity", label: "Severity" },
       ],
     },
   ];
@@ -145,36 +143,24 @@ async function ProjectBugs({ params, searchParams }: Pick<PageProps<"/o/[org]/p/
               {total === 0 && values.status === "open" && !values.q ? "No open bugs. Nice." : "Nothing matches these filters."}
             </div>
           ) : (
-            <ul className="divide-y divide-line overflow-hidden rounded-xl border border-line bg-surface">
-              {items.map((b) => {
-                const href = `${base}/bugs/${b.number}`;
-                return (
-                  <li key={b.id} className="relative flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3 hover:bg-surface-2 md:flex-nowrap">
-                    <span className="w-20 shrink-0 font-mono text-xs text-muted">
-                      {project.key}-{b.number}
-                    </span>
-                    <div className="min-w-0 flex-1 basis-full md:basis-auto">
-                      <Link href={href} className="line-clamp-2 text-sm font-medium after:absolute after:inset-0">
-                        {b.title}
-                      </Link>
-                      <p className="mt-0.5 truncate text-xs text-muted">
-                        {b.versionName}
-                        {b.componentName && <> · {b.componentName}</>}
-                        {b.assigneeName ? <> · {b.assigneeName}</> : <> · unassigned</>}
-                        {b.attachmentCount > 0 && <> · {b.attachmentCount} {b.attachmentCount === 1 ? "file" : "files"}</>}
-                        {b.hasCapture && <> · API log</>}
-                      </p>
-                    </div>
-                    <div className="flex shrink-0 items-center gap-2">
-                      <SeverityBadge value={b.severity} />
-                      <PriorityBadge value={b.priority} />
-                      <StatusPill name={b.resolution ? `${b.statusName} · ${RESOLUTION_LABEL[b.resolution]}` : b.statusName} color={b.statusColor} />
-                      <CopyFixButton id={`${project.key}-${b.number}`} />
-                    </div>
+            <div className="overflow-hidden rounded-xl border border-line bg-surface">
+              <div className={`hidden gap-4 border-b border-line bg-surface-2 px-4 py-2 text-xs font-medium uppercase tracking-wide text-muted md:grid ${GRID}`}>
+                <span>Key</span>
+                <span>Feature</span>
+                <span>Bug</span>
+                <span>Severity</span>
+                <span>Status</span>
+                <span className="text-right">Reference</span>
+                <span className="text-right">Agent</span>
+              </div>
+              <ul className="divide-y divide-line">
+                {items.map((b) => (
+                  <li key={b.id}>
+                    <BugRow bug={b} projectKey={project.key} href={`${base}/bugs/${b.number}`} />
                   </li>
-                );
-              })}
-            </ul>
+                ))}
+              </ul>
+            </div>
           )}
 
           {pages > 1 && (
@@ -198,6 +184,47 @@ async function ProjectBugs({ params, searchParams }: Pick<PageProps<"/o/[org]/p/
           )}
         </>
       )}
+    </div>
+  );
+}
+
+const GRID = "md:grid-cols-[5rem_10rem_minmax(0,1fr)_6rem_9rem_5rem_4.5rem]";
+
+function BugRow({ bug: b, projectKey, href }: { bug: BugListItem; projectKey: string; href: string }) {
+  const key = `${projectKey}-${b.number}`;
+  const status = <StatusPill name={b.resolution ? `${b.statusName} · ${RESOLUTION_LABEL[b.resolution]}` : b.statusName} color={b.statusColor} />;
+  const reference = <ReferenceButton media={mediaLinks(b.media)} title={b.title} refLabel={key} href={href} />;
+  const fix = <CopyFixButton id={key} />;
+  // The whole row is clickable through the title link's ::after overlay; the buttons sit above it.
+  return (
+    <div className={`relative grid grid-cols-[1fr_auto] gap-x-4 gap-y-1.5 px-4 py-3 text-sm hover:bg-surface-2 md:items-center md:gap-y-0 ${GRID}`}>
+      <span className="font-mono text-xs text-muted">{key}</span>
+      <span className="text-right md:hidden">{status}</span>
+      <span className="col-span-2 min-w-0 truncate text-xs font-medium md:col-span-1">
+        {b.componentName ?? <span className="font-normal text-muted">No feature</span>}
+      </span>
+      <div className="col-span-2 min-w-0 md:col-span-1">
+        <Link
+          href={href}
+          className="line-clamp-2 font-medium outline-none after:absolute after:inset-0 focus-visible:after:ring-2 focus-visible:after:ring-accent focus-visible:after:ring-inset"
+        >
+          {b.title}
+        </Link>
+        <p className="mt-0.5 truncate text-xs text-muted">
+          Found in {b.versionName} · {b.assigneeName ?? "Unassigned"}
+          {b.hasCapture && <> · API log</>}
+        </p>
+      </div>
+      <span className="col-span-2 flex flex-wrap items-center gap-1.5 md:col-span-1">
+        <SeverityBadge value={b.severity} />
+        <span className="ml-auto flex items-center gap-2 md:hidden">
+          {reference}
+          {fix}
+        </span>
+      </span>
+      <span className="hidden md:block">{status}</span>
+      <span className="hidden text-right md:block">{reference}</span>
+      <span className="hidden text-right md:block">{fix}</span>
     </div>
   );
 }

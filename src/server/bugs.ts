@@ -52,7 +52,7 @@ export interface BugFilters {
   assignee?: string;
   severity?: string;
   priority?: string;
-  sort?: "updated" | "created" | "priority";
+  sort?: "updated" | "created" | "severity";
   page?: number;
 }
 
@@ -69,12 +69,14 @@ export interface BugListItem {
   assigneeName: string | null;
   versionName: string;
   componentName: string | null;
-  attachmentCount: number;
-  firstImageId: string | null;
+  /** Screenshots and recordings, oldest first, for the list's reference column. */
+  media: ListMedia[];
   hasCapture: boolean;
   createdAt: Date;
   updatedAt: Date;
 }
+
+export type ListMedia = Pick<Attachment, "id" | "kind" | "fileName" | "trimStartMs" | "trimEndMs">;
 
 export const BUGS_PAGE_SIZE = 50;
 
@@ -108,16 +110,14 @@ export async function listBugs(orgId: string, projectId: string, userId: string,
   if (f.priority && (PRIORITIES as readonly string[]).includes(f.priority)) add("b.priority = ?::bug_priority", f.priority);
 
   const order =
-    f.sort === "created" ? "b.number desc" : f.sort === "priority" ? "b.priority, b.severity, b.updated_at desc" : "b.updated_at desc";
+    f.sort === "created" ? "b.number desc" : f.sort === "severity" ? "b.severity, b.updated_at desc" : "b.updated_at desc";
   const page = Math.max(1, f.page ?? 1);
   const whereSql = where.join(" and ");
 
   return inOrg(orgId, async (tx) => {
-    const items = await tx.query<BugListItem>(
+    const rows = await tx.query<Omit<BugListItem, "media">>(
       `select b.id, b.number, b.title, s.name as "statusName", s.category as "statusCategory", s.color as "statusColor",
               b.severity, b.priority, b.resolution, a.full_name as "assigneeName", v.name as "versionName", c.name as "componentName",
-              (select count(*)::int from bug_attachments x where x.bug_id = b.id and x.deleted_at is null and x.kind <> 'log') as "attachmentCount",
-              (select x.id from bug_attachments x where x.bug_id = b.id and x.deleted_at is null and x.kind = 'image' order by x.created_at limit 1) as "firstImageId",
               exists (select 1 from bug_captures bc where bc.bug_id = b.id) as "hasCapture",
               b.created_at as "createdAt", b.updated_at as "updatedAt"
          from bugs b
@@ -135,6 +135,16 @@ export async function listBugs(orgId: string, projectId: string, userId: string,
       `select count(*)::int as n from bugs b join workflow_statuses s on s.id = b.status_id where ${whereSql}`,
       params,
     );
+    const media = rows.length
+      ? await tx.query<ListMedia & { bugId: string }>(
+          `select bug_id as "bugId", id, kind, file_name as "fileName", trim_start_ms as "trimStartMs", trim_end_ms as "trimEndMs"
+             from bug_attachments
+            where bug_id = any($1::uuid[]) and deleted_at is null and kind in ('image', 'video')
+            order by created_at`,
+          [rows.map((r) => r.id)],
+        )
+      : [];
+    const items = rows.map((r) => ({ ...r, media: media.filter((m) => m.bugId === r.id) }));
     return { items, total: total?.n ?? 0 };
   });
 }

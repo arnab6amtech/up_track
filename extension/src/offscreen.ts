@@ -13,22 +13,19 @@ let maxMs = 0;
 // Pauses don't count towards the length or the time limit.
 let pausedTotal = 0;
 let pausedAt: number | null = null;
-let discard = false;
 
 const elapsed = () => (pausedAt ?? performance.now()) - startedAt - pausedTotal;
 
 chrome.runtime.onMessage.addListener((message: OffscreenMessage, _sender, sendResponse) => {
   if (message?.target !== "offscreen") return false;
-  if (message.type === "prepare") {
-    prepare(message.streamId, message.maxMs).then(
+  if (message.type === "start") {
+    start(message.streamId, message.maxMs).then(
       () => sendResponse({ ok: true }),
       (err: unknown) => sendResponse({ ok: false, error: err instanceof Error ? err.message : String(err) }),
     );
     return true;
   }
-  if (message.type === "begin") begin();
-  else if (message.type === "cancel") cancel();
-  else if (message.type === "pause") pause();
+  if (message.type === "pause") pause();
   else if (message.type === "resume") resume();
   else stop();
   sendResponse({ ok: true });
@@ -36,33 +33,7 @@ chrome.runtime.onMessage.addListener((message: OffscreenMessage, _sender, sendRe
 });
 
 function stop() {
-  if (!recorder) return;
-  // Never started: nothing to keep.
-  if (recorder.state === "inactive") return cancel();
-  recorder.stop();
-}
-
-/** Ends without keeping anything (the reporter cancelled before or during the recording). */
-function cancel() {
-  discard = true;
   if (recorder && recorder.state !== "inactive") recorder.stop();
-  else release();
-}
-
-function release() {
-  clearTimeout(stopTimer);
-  stream?.getTracks().forEach((t) => t.stop());
-  chunks = [];
-  recorder = null;
-  stream = null;
-}
-
-/** Starts recording the stream opened by prepare(). */
-function begin() {
-  if (recorder?.state !== "inactive") return;
-  startedAt = performance.now();
-  recorder.start(1000);
-  stopTimer = setTimeout(stop, maxMs);
 }
 
 function pause() {
@@ -87,12 +58,10 @@ function resume() {
  */
 const FRAME_LIMITS = { minWidth: 160, minHeight: 90, maxWidth: 1920, maxHeight: 1920 };
 
-/** Opens the tab's stream and sets up the recorder; begin() starts it. */
-async function prepare(streamId: string, limitMs: number) {
+async function start(streamId: string, limitMs: number) {
   maxMs = limitMs;
   pausedTotal = 0;
   pausedAt = null;
-  discard = false;
   stream = await navigator.mediaDevices.getUserMedia({
     audio: false,
     // Chrome's tab-capture constraints aren't in the standard typings.
@@ -107,11 +76,13 @@ async function prepare(streamId: string, limitMs: number) {
   recorder.onstop = () => void finish();
   // Stop if the tab goes away or Chrome ends the capture.
   stream.getVideoTracks()[0]?.addEventListener("ended", stop);
+  startedAt = performance.now();
+  recorder.start(1000);
+  stopTimer = setTimeout(stop, maxMs);
 }
 
 async function finish() {
   clearTimeout(stopTimer);
-  if (discard) return release();
   const durationMs = Math.round(elapsed());
   const settings = stream?.getVideoTracks()[0]?.getSettings();
   stream?.getTracks().forEach((t) => t.stop());

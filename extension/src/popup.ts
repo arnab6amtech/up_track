@@ -31,14 +31,6 @@ let timer: ReturnType<typeof setInterval> | undefined;
 
 function showRecording(state: RecordingState) {
   show("recording");
-  // Ready: the page shows a Start button (it opens the controls' window, which only a click in the page can do).
-  const ready = state.phase === "ready";
-  $("rec-label").textContent = ready ? "Ready to record" : "Recording";
-  $("timer").hidden = ready;
-  $("stop").textContent = ready ? "Cancel" : "Stop and review";
-  $("rec-help").textContent = ready
-    ? "Click “Start recording” on the page. The controls open in a small window that isn't recorded."
-    : "Reproduce the bug in the tab now. The API calls it makes are recorded too.";
   const tick = () => {
     const s = Math.floor(recordedMs(state) / 1000);
     $("timer").textContent = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;

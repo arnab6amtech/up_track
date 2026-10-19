@@ -1,12 +1,6 @@
-// Recording controls and on-page tools for the tab being recorded.
-//
-// The controls (stop, pause/resume, time, pen, blur) live in a small floating Picture-in-Picture window. That window
-// is outside the tab, so the controls never show up in the recording. Chrome only opens it on a click in the page, so
-// a recording starts with a "Start recording" card on the page, which is gone before the recorder starts. When the
-// page navigates, its floating window closes with it; the controls come back on the next click in the page. Where
-// Picture-in-Picture isn't available, the controls sit on the page instead (and are recorded).
-//
-// The pen and blur work on the page itself, so what they draw and hide is recorded.
+// Recording toolbar, injected into the tab being recorded: stop, pause/resume, the time so far, a pen that draws
+// on the page and a blur tool that covers parts of it. It's part of the page, so it ends up in the recording along
+// with whatever it draws or blurs. Everything lives in a shadow root, so the page's styles can't reach it.
 
 import { recordedMs, type BackgroundMessage, type RecordingState, type TabMessage } from "./shared/types";
 
@@ -25,7 +19,7 @@ const ICONS = {
   grip: '<svg viewBox="0 0 20 20" fill="currentColor"><circle cx="7" cy="5" r="1.4"/><circle cx="13" cy="5" r="1.4"/><circle cx="7" cy="10" r="1.4"/><circle cx="13" cy="10" r="1.4"/><circle cx="7" cy="15" r="1.4"/><circle cx="13" cy="15" r="1.4"/></svg>',
 };
 
-/** The page layer: pen ink, blurs, and the start card. */
+/** The page layer: pen ink and blurs. */
 const PAGE_CSS = `
   .ink { position: fixed; inset: 0; width: 100vw; height: 100vh; pointer-events: none; }
   .ink.on { pointer-events: auto; cursor: crosshair; }
@@ -35,28 +29,14 @@ const PAGE_CSS = `
     backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); pointer-events: none; }
   .preview { position: fixed; border: 1.5px dashed #fff; border-radius: 6px; outline: 1px dashed rgb(0 0 0 / 0.6);
     background: rgb(255 255 255 / 0.1); pointer-events: none; }
-  .ready { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); display: flex; align-items: center; gap: 18px;
-    padding: 12px 12px 12px 18px; border: 1px solid rgb(255 255 255 / 0.12); border-radius: 14px; background: rgb(24 24 27 / 0.96);
-    box-shadow: 0 12px 32px rgb(0 0 0 / 0.35); color: #fff; font: 14px/1.35 system-ui, -apple-system, "Segoe UI", sans-serif; }
-  .ready p { margin: 0; display: grid; gap: 2px; }
-  .ready small { color: rgb(255 255 255 / 0.6); font-size: 12px; }
-  .ready .actions { display: flex; gap: 8px; }
-  .ready button { all: unset; padding: 8px 14px; border-radius: 9px; font-weight: 600; cursor: pointer; }
-  .ready .start { background: #f43f5e; color: #fff; }
-  .ready .start:hover { background: #e11d48; }
-  .ready .cancel { color: rgb(255 255 255 / 0.8); }
-  .ready .cancel:hover { background: rgb(255 255 255 / 0.1); }
-  .ready button:focus-visible { outline: 2px solid #fff; }
 `;
 
-/** The controls, in their floating window (or on the page as a fallback). */
+/** The toolbar pill. */
 const BAR_CSS = `
   .bar { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); display: flex; align-items: center; gap: 2px;
     padding: 6px 6px 6px 8px; border: 1px solid rgb(255 255 255 / 0.12); border-radius: 14px; background: rgb(24 24 27 / 0.94);
     box-shadow: 0 12px 32px rgb(0 0 0 / 0.35); color: #fff; font: 500 14px/1 system-ui, -apple-system, "Segoe UI", sans-serif;
     user-select: none; -webkit-user-select: none; box-sizing: border-box; }
-  .bar.floating { position: static; transform: none; width: 100%; height: 100%; justify-content: center; border: 0; border-radius: 0;
-    box-shadow: none; padding: 0 8px; }
   button { all: unset; display: grid; place-items: center; width: 34px; height: 34px; border-radius: 9px; cursor: pointer; color: #fff; }
   button:hover { background: rgb(255 255 255 / 0.1); }
   button[aria-pressed="true"] { background: rgb(255 255 255 / 0.2); }
@@ -82,12 +62,7 @@ interface Controls {
   pause: HTMLButtonElement;
   stop: HTMLButtonElement;
   tools: HTMLButtonElement[];
-  /** The floating window, when the controls are in one. */
-  window: Window | null;
-  remove(): void;
 }
-
-type PictureInPicture = { requestWindow(options: { width: number; height: number }): Promise<Window> };
 
 /** False once the extension is reloaded or updated: this copy can't reach it any more. */
 function connected(): boolean {
@@ -106,8 +81,6 @@ async function send(message: BackgroundMessage): Promise<{ recording?: Recording
     return null;
   }
 }
-
-const nextFrame = () => new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
 
 if (!document.getElementById(HOST_ID)) void setUp();
 
@@ -133,7 +106,6 @@ async function setUp() {
   const preview = q<HTMLDivElement>(".preview");
   const blurs = q<HTMLDivElement>(".blurs");
   let controls: Controls | null = null;
-  let ended = false;
 
   // ---- Time and pause ----
 
@@ -161,28 +133,13 @@ async function setUp() {
   };
   chrome.runtime.onMessage.addListener(onMessage);
 
-  // ---- The controls ----
+  // ---- The toolbar ----
 
-  /** Opens the floating window; needs a click in the page just before. Null where it isn't available. */
-  async function openFloatingWindow(): Promise<Window | null> {
-    const pip = (window as unknown as { documentPictureInPicture?: PictureInPicture }).documentPictureInPicture;
-    if (!pip) return null;
-    try {
-      const w = await pip.requestWindow({ width: 320, height: 64 });
-      w.document.title = "UpTrack recording";
-      return w;
-    } catch {
-      return null;
-    }
-  }
-
-  function buildControls(floating: Window | null): Controls {
-    const doc = floating?.document ?? document;
-    const container: ParentNode = floating ? doc.body : root;
-    const style = doc.createElement("style");
-    style.textContent = floating ? `${BAR_CSS} html, body { margin: 0; height: 100%; background: rgb(24 24 27); }` : BAR_CSS;
-    const bar = doc.createElement("div");
-    bar.className = floating ? "bar floating" : "bar";
+  function buildControls(): Controls {
+    const style = document.createElement("style");
+    style.textContent = BAR_CSS;
+    const bar = document.createElement("div");
+    bar.className = "bar";
     bar.setAttribute("role", "toolbar");
     bar.setAttribute("aria-label", "UpTrack recording");
     bar.innerHTML = `
@@ -192,9 +149,8 @@ async function setUp() {
       <span class="sep"></span>
       <button class="tool" data-tool="pen" title="Draw on the page" aria-pressed="false" aria-label="Pen">${ICONS.pen}</button>
       <button class="tool" data-tool="blur" title="Blur part of the page: drag over it. Click a blur to remove it." aria-pressed="false" aria-label="Blur">${ICONS.blur}</button>
-      ${floating ? "" : `<span class="grip" title="Drag to move">${ICONS.grip}</span>`}`;
-    (floating ? doc.head : container).append(style);
-    container.append(bar);
+      <span class="grip" title="Drag to move">${ICONS.grip}</span>`;
+    root.append(style, bar);
 
     const made: Controls = {
       bar,
@@ -202,16 +158,7 @@ async function setUp() {
       pause: bar.querySelector(".pause")!,
       stop: bar.querySelector(".stop")!,
       tools: [...bar.querySelectorAll<HTMLButtonElement>(".tool")],
-      window: floating,
-      remove() {
-        if (floating) floating.close();
-        else {
-          style.remove();
-          bar.remove();
-        }
-      },
     };
-
     made.pause.addEventListener("click", async () => {
       made.pause.disabled = true;
       const result = await send({ type: state?.pausedAt != null ? "record-resume" : "record-pause" });
@@ -227,60 +174,8 @@ async function setUp() {
       await send({ type: "record-stop" });
     });
     made.tools.forEach((b) => b.addEventListener("click", () => setTool(b.dataset.tool as Tool)));
-    if (!floating) makeMovable(bar);
-
-    // Closing the window (or the page navigating, which closes it too) hides the controls until the next click.
-    floating?.addEventListener("pagehide", () => {
-      if (controls === made) {
-        controls = null;
-        if (!ended) showControlsOnNextClick();
-      }
-    });
+    makeMovable(bar);
     return made;
-  }
-
-  async function showControls() {
-    if (controls) return;
-    controls = buildControls(await openFloatingWindow());
-    syncTools();
-    showState();
-  }
-
-  /** The floating window needs a click in the page to open; the click itself goes on to the page as usual. */
-  function showControlsOnNextClick() {
-    const onDown = (e: PointerEvent) => {
-      if (!e.isTrusted) return;
-      window.removeEventListener("pointerdown", onDown, true);
-      if (!ended) void showControls();
-    };
-    window.addEventListener("pointerdown", onDown, true);
-  }
-
-  // Ready: the reporter starts the recording from the page, which also opens the controls. The card is gone before
-  // the recorder starts, so it isn't recorded.
-  if (state.phase === "ready") {
-    const card = document.createElement("div");
-    card.className = "ready";
-    card.innerHTML = `
-      <p><strong>Ready to record this tab</strong><small>The controls open in a small window that isn't recorded.</small></p>
-      <div class="actions"><button class="cancel">Cancel</button><button class="start">Start recording</button></div>`;
-    root.append(card);
-    const start = card.querySelector<HTMLButtonElement>(".start")!;
-    start.focus();
-    card.querySelector(".cancel")!.addEventListener("click", () => void send({ type: "record-cancel" }));
-    start.addEventListener("click", async () => {
-      start.disabled = true;
-      await showControls();
-      card.remove();
-      // Let the page repaint without the card before recording starts.
-      await nextFrame();
-      await nextFrame();
-      const result = await send({ type: "record-begin" });
-      if (result?.recording) state = result.recording;
-      showState();
-    });
-  } else {
-    showControlsOnNextClick();
   }
 
   // ---- Tools ----
@@ -404,7 +299,14 @@ async function setUp() {
   catcher.addEventListener("pointerup", endBlur);
   catcher.addEventListener("pointercancel", endBlur);
 
-  // ---- Moving the on-page controls (the floating window moves like any window) ----
+  // ---- Showing the toolbar ----
+
+  controls = buildControls();
+  syncTools();
+  showState();
+
+  // ---- Moving the toolbar ----
+
 
   function makeMovable(bar: HTMLElement) {
     const grip = bar.querySelector<HTMLElement>(".grip")!;
@@ -429,7 +331,6 @@ async function setUp() {
   // ---- Leaving ----
 
   function teardown() {
-    ended = true;
     clearInterval(ticker);
     cancelAnimationFrame(frame);
     window.removeEventListener("resize", fitCanvas);
@@ -437,8 +338,6 @@ async function setUp() {
     try {
       chrome.runtime.onMessage.removeListener(onMessage);
     } catch {}
-    controls?.remove();
-    controls = null;
     host.remove();
   }
 }

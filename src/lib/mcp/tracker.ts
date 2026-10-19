@@ -1,5 +1,5 @@
 import "server-only";
-import { isFailed, type CaptureLog } from "../capture-types";
+import { isApiCall, isFailed, type CaptureLog } from "../capture-types";
 import { PRIORITY_LABEL, RESOLUTION_LABEL, SEVERITY_LABEL } from "../labels";
 import { canViewProject } from "@/server/access";
 import { findBugByKey, listComments, PRIORITIES, SEVERITIES, type BugDetail } from "@/server/bugs";
@@ -179,12 +179,18 @@ export async function getTrackerBug(caller: TokenCaller, key: string, baseUrl: s
     lines.push("", "## Captured page", `- **Page:** ${c.pageUrl}`, `- **Browser:** ${[c.browser, c.os].filter(Boolean).join(" · ")}, window ${c.viewportWidth}×${c.viewportHeight}`);
     const log = await readLog(bug);
     if (log) {
-      const failed = log.network.filter(isFailed);
-      lines.push("", `## Failed API calls (${failed.length} of ${log.network.length})`);
+      const apiCalls = log.network.filter(isApiCall);
+      const failed = apiCalls.filter(isFailed);
+      const failedFiles = log.network.filter((e) => !isApiCall(e) && isFailed(e));
+      lines.push("", `## Failed API calls (${failed.length} of ${apiCalls.length})`);
       if (failed.length === 0) lines.push("None.");
       for (const e of failed.slice(0, 10)) {
         lines.push(`- ${describeCall(e)}`);
         if (e.responseBody) lines.push(`  Response: ${clip(e.responseBody.replace(/\s+/g, " "), 400)}`);
+      }
+      if (failedFiles.length) {
+        lines.push("", `## Files that failed to load (${failedFiles.length})`);
+        for (const e of failedFiles.slice(0, 10)) lines.push(`- ${e.type}: ${e.url}${e.status ? ` (${e.status})` : ""}`);
       }
       const errors = log.console.filter((x) => x.level === "error");
       if (errors.length) {
@@ -232,7 +238,7 @@ export async function getTrackerReference(caller: TokenCaller, key: string, base
 export async function getTrackerLogs(
   caller: TokenCaller,
   key: string,
-  opts: { failed_only?: boolean; url_contains?: string; include_bodies?: boolean; limit?: number },
+  opts: { failed_only?: boolean; url_contains?: string; include_bodies?: boolean; include_files?: boolean; limit?: number },
 ): Promise<ToolResult> {
   const bug = await visibleBug(caller, key);
   if (!bug) return fail(`No bug ${key.toUpperCase()} that you can see.`);
@@ -240,9 +246,12 @@ export async function getTrackerLogs(
   if (!log) return fail(`${key.toUpperCase()} wasn't reported with the browser extension, so it has no API log.`);
   const needle = opts.url_contains?.toLowerCase();
   const limit = opts.limit ?? 50;
-  const calls = log.network.filter((e) => (!opts.failed_only || isFailed(e)) && (!needle || e.url.toLowerCase().includes(needle)));
+  // Documents, styles, scripts, images and other files only when asked: they rarely explain a bug.
+  const pool = opts.include_files ? log.network : log.network.filter(isApiCall);
+  const calls = pool.filter((e) => (!opts.failed_only || isFailed(e)) && (!needle || e.url.toLowerCase().includes(needle)));
   return json({
-    total_calls: log.network.length,
+    total_calls: pool.length,
+    ...(opts.include_files ? {} : { other_requests: log.network.length - pool.length }),
     matching_calls: calls.length,
     calls: calls.slice(0, limit).map((e) => (opts.include_bodies === false ? { ...e, requestBody: undefined, responseBody: undefined } : e)),
     console: log.console.slice(0, limit),

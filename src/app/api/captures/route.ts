@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { PRIORITIES, SEVERITIES, type ReportableProject } from "@/lib/capture-types";
+import { NETWORK_TYPES, PRIORITIES, SEVERITIES, type ReportableProject } from "@/lib/capture-types";
 import { publicOrigin } from "@/lib/origin";
 import { createBug, createShareLink } from "@/server/bugs";
 import { listReportableProjects } from "@/server/reportable";
@@ -54,7 +54,7 @@ const logSchema = z.object({
   network: z
     .array(
       z.object({
-        type: z.enum(["fetch", "xhr"]),
+        type: z.enum(NETWORK_TYPES),
         method: str(20),
         url: str(8000),
         status: z.number().int().min(0).max(999),
@@ -66,6 +66,7 @@ const logSchema = z.object({
         requestBody: str(200_000).optional(),
         responseBody: str(200_000).optional(),
         error: str(2000).optional(),
+        sizeBytes: z.number().int().min(0).optional(),
       }),
     )
     .max(2000),

@@ -118,6 +118,10 @@ export function createMcpServer({ baseUrl, caller }: { baseUrl: string; caller: 
         failed_only: z.boolean().optional().describe("Only calls that failed (network error or HTTP 4xx/5xx)."),
         url_contains: z.string().optional().describe("Only calls whose URL contains this text."),
         include_bodies: z.boolean().optional().describe("Include request/response bodies. Default true."),
+        include_files: z
+          .boolean()
+          .optional()
+          .describe("Also list the documents, stylesheets, scripts, fonts, images and media the page loaded (URL, status, timing, size). Default false."),
         limit: z.number().int().min(1).max(200).optional().describe("Default 50."),
       },
       annotations: READ_ONLY,

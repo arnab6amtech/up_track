@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { isFailed, type CaptureLog, type NetworkEntry } from "@/lib/capture-types";
+import { inFilter, isFailed, NETWORK_FILTERS, type CaptureLog, type NetworkEntry } from "@/lib/capture-types";
 import { useCopy } from "./agent-command";
 
 /** Network and console log of a captured bug, loaded on demand from the capture's log file. */
@@ -11,6 +11,7 @@ export function CaptureLogPanel({ logUrl, failedCount }: { logUrl: string; faile
   const [tab, setTab] = useState<"network" | "console">("network");
   const [failedOnly, setFailedOnly] = useState(failedCount > 0);
   const [query, setQuery] = useState("");
+  const [types, setTypes] = useState("all");
   const [open, setOpen] = useState<number | null>(null);
 
   useEffect(() => {
@@ -30,8 +31,8 @@ export function CaptureLogPanel({ logUrl, failedCount }: { logUrl: string; faile
     const q = query.trim().toLowerCase();
     return log.network
       .map((e, i) => ({ e, i }))
-      .filter(({ e }) => (!failedOnly || isFailed(e)) && (!q || e.url.toLowerCase().includes(q)));
-  }, [log, failedOnly, query]);
+      .filter(({ e }) => inFilter(e, types) && (!failedOnly || isFailed(e)) && (!q || e.url.toLowerCase().includes(q)));
+  }, [log, failedOnly, query, types]);
 
   if (error) return <p className="text-sm text-muted">The log couldn&apos;t be loaded.</p>;
   if (!log) return <div className="h-32 animate-pulse rounded-xl bg-surface-2" />;
@@ -44,7 +45,7 @@ export function CaptureLogPanel({ logUrl, failedCount }: { logUrl: string; faile
         <div className="inline-flex rounded-lg border border-line p-0.5 text-xs" role="tablist">
           {(
             [
-              ["network", `API calls ${log.network.length}`],
+              ["network", `Network ${log.network.length}`],
               ["console", `Console ${consoleCount}`],
             ] as const
           ).map(([key, label]) => (
@@ -82,10 +83,33 @@ export function CaptureLogPanel({ logUrl, failedCount }: { logUrl: string; faile
         )}
       </div>
 
+      {tab === "network" && (
+        // Request types, as in DevTools. Types with nothing recorded stay clickable but quiet.
+        <div className="flex flex-wrap gap-1 border-b border-line px-3 py-1.5" role="toolbar" aria-label="Request types">
+          {NETWORK_FILTERS.map((f) => {
+            const n = log.network.filter((e) => inFilter(e, f.id)).length;
+            return (
+              <button
+                key={f.id}
+                type="button"
+                aria-pressed={types === f.id}
+                onClick={() => setTypes(f.id)}
+                title={`${n} ${n === 1 ? "request" : "requests"}`}
+                className={`rounded px-2 py-0.5 text-xs font-medium ${
+                  types === f.id ? "bg-surface-2 text-foreground ring-1 ring-line" : `text-muted hover:text-foreground ${n ? "" : "opacity-50"}`
+                }`}
+              >
+                {f.label}
+              </button>
+            );
+          })}
+        </div>
+      )}
+
       {tab === "network" ? (
         rows.length === 0 ? (
           <p className="px-4 py-8 text-center text-sm text-muted">
-            {log.network.length === 0 ? "No API calls were recorded." : "No calls match."}
+            {log.network.length === 0 ? "No requests were recorded." : "No requests match these filters."}
           </p>
         ) : (
           <ul className="max-h-[32rem] divide-y divide-line overflow-y-auto">
@@ -95,18 +119,23 @@ export function CaptureLogPanel({ logUrl, failedCount }: { logUrl: string; faile
                   type="button"
                   onClick={() => setOpen(open === i ? null : i)}
                   aria-expanded={open === i}
-                  className="grid w-full grid-cols-[3.25rem_3.5rem_1fr_auto] items-center gap-3 px-3 py-2 text-left text-xs hover:bg-surface-2"
+                  className="grid w-full grid-cols-[3.25rem_4.75rem_1fr_auto] items-center gap-3 px-3 py-2 text-left text-xs hover:bg-surface-2"
                 >
                   <StatusPill entry={e} />
-                  <span className="font-mono font-medium">{e.method}</span>
+                  {e.type === "fetch" || e.type === "xhr" ? (
+                    <span className="font-mono font-medium">{e.method}</span>
+                  ) : (
+                    <span className="font-mono text-muted">{TYPE_LABEL[e.type] ?? e.type}</span>
+                  )}
                   <span className="min-w-0 truncate font-mono" title={e.url}>
                     <UrlText url={e.url} />
                   </span>
                   <span className="whitespace-nowrap text-muted tabular-nums">
+                    {e.sizeBytes ? `${formatSize(e.sizeBytes)} · ` : ""}
                     {Math.round(e.durationMs)} ms · +{((e.startedAt - start) / 1000).toFixed(1)}s
                   </span>
                 </button>
-                {open === i && <EntryDetails entry={e} />}
+                {open === i && (hasDetails(e) ? <EntryDetails entry={e} /> : <ResourceDetails entry={e} />)}
               </li>
             ))}
           </ul>
@@ -138,17 +167,70 @@ export function CaptureLogPanel({ logUrl, failedCount }: { logUrl: string; faile
   );
 }
 
+/** Short type label for files, like DevTools' Type column; API calls show their method instead. */
+const TYPE_LABEL: Record<string, string> = {
+  document: "Doc",
+  stylesheet: "CSS",
+  script: "JS",
+  font: "Font",
+  image: "Img",
+  media: "Media",
+  manifest: "Manifest",
+  websocket: "WS",
+  wasm: "Wasm",
+  other: "Other",
+};
+
+function formatSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(bytes < 10 * 1024 ? 1 : 0)} kB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
+const hasDetails = (e: NetworkEntry) =>
+  Boolean(e.requestBody || e.responseBody || Object.keys(e.requestHeaders ?? {}).length || Object.keys(e.responseHeaders ?? {}).length);
+
 function StatusPill({ entry: e }: { entry: NetworkEntry }) {
   const failed = isFailed(e);
+  // A file's status is 0 when the browser didn't report it (cross-origin); that isn't a failure.
+  const unknown = !e.status && !failed;
   return (
     <span
       className={`rounded px-1.5 py-0.5 text-center font-mono font-semibold ${
-        failed ? "bg-red-100 text-red-800" : e.status >= 300 ? "bg-amber-100 text-amber-800" : "bg-emerald-100 text-emerald-800"
+        failed
+          ? "bg-red-100 text-red-800"
+          : unknown
+            ? "bg-surface-2 text-muted"
+            : e.status >= 300 && e.status !== 304
+              ? "bg-amber-100 text-amber-800"
+              : "bg-emerald-100 text-emerald-800"
       }`}
-      title={e.error ?? e.statusText}
+      title={e.error ?? e.statusText ?? (unknown ? "Status not reported by the browser" : undefined)}
     >
-      {e.status || "ERR"}
+      {e.status || (failed ? "ERR" : "—")}
     </span>
+  );
+}
+
+/** Files and sockets have no headers or bodies, just what the browser reported about them. */
+function ResourceDetails({ entry: e }: { entry: NetworkEntry }) {
+  const rows: [string, string][] = [
+    ["Type", TYPE_LABEL[e.type] ?? e.type],
+    ["URL", e.url],
+    ["Status", e.status ? `${e.status}${e.statusText ? ` ${e.statusText}` : ""}` : "Not reported by the browser"],
+    ...(e.sizeBytes ? ([["Size", formatSize(e.sizeBytes)]] as [string, string][]) : []),
+    ["Time", `${Math.round(e.durationMs)} ms`],
+    ...(e.error ? ([["Error", e.error]] as [string, string][]) : []),
+  ];
+  return (
+    <dl className="grid gap-x-4 gap-y-1 border-t border-line bg-surface-2/50 px-3 py-3 text-xs sm:grid-cols-[5rem_1fr]">
+      {rows.map(([k, v]) => (
+        <div key={k} className="contents">
+          <dt className="text-muted">{k}</dt>
+          <dd className={`min-w-0 break-all ${k === "URL" ? "font-mono" : ""}`}>{v}</dd>
+        </div>
+      ))}
+    </dl>
   );
 }
 

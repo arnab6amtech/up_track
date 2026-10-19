@@ -196,7 +196,7 @@ async function Bug({ params }: Pick<PageProps<"/o/[org]/p/[key]/bugs/[number]">,
               // Bugs reported with the browser extension also carry the page they came from and its API log.
               ...(bug.capture ? [{ id: "page", label: "Captured page", content: <CapturedPage capture={bug.capture} heading={false} /> }] : []),
               ...(bug.capture?.logAttachmentId
-                ? [{ id: "api", label: "API calls & console", content: <CaptureLog capture={bug.capture} heading={false} /> }]
+                ? [{ id: "api", label: "Network & console", content: <CaptureLog capture={bug.capture} heading={false} /> }]
                 : []),
               {
                 id: "comments",

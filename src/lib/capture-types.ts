@@ -1,11 +1,61 @@
 /** Shapes shared by the capture API, the share page and the browser extension's uploads. */
 
 
+/**
+ * What a request loaded, grouped the way Chrome DevTools does. Fetch/XHR calls are recorded in full (headers
+ * and bodies); the rest come from the browser's resource timing, which gives URL, timing and size only.
+ */
+export const NETWORK_TYPES = [
+  "fetch",
+  "xhr",
+  "document",
+  "stylesheet",
+  "script",
+  "font",
+  "image",
+  "media",
+  "manifest",
+  "websocket",
+  "wasm",
+  "other",
+] as const;
+export type NetworkType = (typeof NETWORK_TYPES)[number];
+
+/** The filter chips over a network log, as in DevTools. */
+export const NETWORK_FILTERS: { id: string; label: string; types: NetworkType[] | null }[] = [
+  { id: "all", label: "All", types: null },
+  { id: "xhr", label: "Fetch/XHR", types: ["fetch", "xhr"] },
+  { id: "doc", label: "Doc", types: ["document"] },
+  { id: "css", label: "CSS", types: ["stylesheet"] },
+  { id: "js", label: "JS", types: ["script"] },
+  { id: "font", label: "Font", types: ["font"] },
+  { id: "img", label: "Img", types: ["image"] },
+  { id: "media", label: "Media", types: ["media"] },
+  { id: "manifest", label: "Manifest", types: ["manifest"] },
+  { id: "socket", label: "Socket", types: ["websocket"] },
+  { id: "wasm", label: "Wasm", types: ["wasm"] },
+  { id: "other", label: "Other", types: ["other"] },
+];
+
+export const inFilter = (e: NetworkEntry, filterId: string) => {
+  const types = NETWORK_FILTERS.find((f) => f.id === filterId)?.types;
+  return !types || types.includes(e.type);
+};
+
+/** The error on files whose element reported a failed load (the browser gives no reason). */
+export const LOAD_FAILED = "Failed to load";
+
+/** API calls proper (fetch, XHR and WebSockets), as opposed to the files the page loaded. */
+export const isApiCall = (e: NetworkEntry) => e.type === "fetch" || e.type === "xhr" || e.type === "websocket";
+
 export interface NetworkEntry {
-  type: "fetch" | "xhr";
+  type: NetworkType;
   method: string;
   url: string;
-  /** 0 when the request never got a response (network error, CORS, aborted). */
+  /**
+   * 0 when an API call never got a response (network error, CORS, aborted). For other resources 0 can also
+   * mean the browser didn't say (a cross-origin file), so it only counts as failed with an error.
+   */
   status: number;
   statusText?: string;
   /** Epoch milliseconds. */
@@ -17,6 +67,8 @@ export interface NetworkEntry {
   responseBody?: string;
   /** Why the request failed, when it did. */
   error?: string;
+  /** Bytes transferred, when the browser reports it. */
+  sizeBytes?: number;
 }
 
 export interface ConsoleEntry {
@@ -79,7 +131,8 @@ export interface ReportableProject {
   components: { id: string; name: string }[];
 }
 
-export const isFailed = (e: NetworkEntry) => e.status === 0 || e.status >= 400;
+export const isFailed = (e: NetworkEntry) =>
+  Boolean(e.error) || e.status >= 400 || (e.status === 0 && (e.type === "fetch" || e.type === "xhr"));
 
 export const SEVERITIES = ["critical", "high", "medium", "low"] as const;
 export const PRIORITIES = ["urgent", "high", "medium", "low"] as const;

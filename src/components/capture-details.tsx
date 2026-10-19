@@ -58,12 +58,12 @@ export function CapturedPage({ capture: c, heading = true }: { capture: CaptureI
 /** The page's API calls and console log, with a one-line summary (or a heading, standing alone). */
 export function CaptureLog({ capture: c, shareToken, heading = true }: { capture: CaptureInfo; shareToken?: string; heading?: boolean }) {
   if (!c.logAttachmentId) return null;
-  const summary = `${c.failedRequestCount} failed of ${c.requestCount} · ${c.consoleErrorCount} console errors`;
+  const summary = `${c.failedRequestCount} failed of ${c.requestCount} ${c.requestCount === 1 ? "request" : "requests"} · ${c.consoleErrorCount} console ${c.consoleErrorCount === 1 ? "error" : "errors"}`;
   return (
     <section className="space-y-2">
       {heading ? (
         <h2 className="text-sm font-semibold">
-          API calls and console <span className="font-normal text-muted">({summary})</span>
+          Network and console <span className="font-normal text-muted">({summary})</span>
         </h2>
       ) : (
         <p className="text-xs text-muted">{summary}</p>

@@ -4,6 +4,7 @@ import { Suspense } from "react";
 import { ConfirmButton } from "@/components/confirm-button";
 import {
   AddComponentForm,
+  AddPlatformForm,
   AddProjectMemberForm,
   AddVersionForm,
   ProjectGeneralForm,
@@ -12,9 +13,9 @@ import {
 } from "@/components/project-settings-forms";
 import { VERSION_STATUS_LABEL } from "@/lib/labels";
 import { getOrgContext, getProjectAccess } from "@/server/access";
-import { archiveComponentAction, removeProjectMemberAction } from "@/server/actions/project";
+import { archiveComponentAction, archivePlatformAction, removeProjectMemberAction } from "@/server/actions/project";
 import { listMembers, listRoles } from "@/server/orgs";
-import { listComponents, listProjectMembers, listVersions } from "@/server/projects";
+import { listComponents, listPlatforms, listProjectMembers, listVersions } from "@/server/projects";
 
 export const metadata = { title: "Project settings — UpTrack" };
 
@@ -47,8 +48,9 @@ async function Settings({ params }: Pick<PageProps<"/o/[org]/p/[key]/settings">,
   const canVersions = access.permissions.has("project.manage_versions");
   if (!canManage && !canVersions) notFound();
   const projectId = access.project.id;
-  const [versions, components, members, orgMembers, projectRoles] = await Promise.all([
+  const [versions, platforms, components, members, orgMembers, projectRoles] = await Promise.all([
     listVersions(ctx.org.id, projectId),
+    listPlatforms(ctx.org.id, projectId),
     listComponents(ctx.org.id, projectId),
     listProjectMembers(ctx.org.id, projectId),
     canManage ? listMembers(ctx.org.id) : Promise.resolve([]),
@@ -107,6 +109,35 @@ async function Settings({ params }: Pick<PageProps<"/o/[org]/p/[key]/settings">,
           ))}
         </ul>
       </Section>
+
+      {canManage && (
+        <Section
+          title="Platforms"
+          hint="The products this project covers, such as Admin panel, User website, Vendor website or User app. With platforms, every new bug says which one it was found on, and the bug list gets a tab for each."
+        >
+          <div className="rounded-xl border border-line bg-surface p-4">
+            <AddPlatformForm ids={ids} />
+          </div>
+          {platforms.length > 0 && (
+            <ul className="divide-y divide-line rounded-xl border border-line bg-surface">
+              {platforms.map((pl) => (
+                <li key={pl.id} className="flex items-center justify-between gap-3 px-4 py-2.5">
+                  <span className="text-sm">
+                    {pl.name} <span className="text-xs text-muted">· {pl.bugCount} bugs</span>
+                  </span>
+                  <ConfirmButton
+                    action={archivePlatformAction}
+                    fields={{ ...ids, platformId: pl.id }}
+                    confirm={`Remove the platform ${pl.name}? Its bugs keep it; it just can't be picked any more.`}
+                    label="Remove"
+                    pendingLabel="Removing…"
+                  />
+                </li>
+              ))}
+            </ul>
+          )}
+        </Section>
+      )}
 
       {canManage && (
         <Section title="Features" hint="Areas of the product, such as Checkout or Admin panel. Every new bug names the feature it's in, so add at least one before reporting.">

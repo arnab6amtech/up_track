@@ -9,7 +9,7 @@ import { TrackerFilters, type FilterSelect } from "@/components/tracker-filters"
 import { RESOLUTION_LABEL, SEVERITY_LABEL } from "@/lib/labels";
 import { getOrgContext, getProjectAccess } from "@/server/access";
 import { BUGS_PAGE_SIZE, listBugs, listStatuses, SEVERITIES, type BugFilters, type BugListItem } from "@/server/bugs";
-import { listComponents, listProjectMembers, listVersions } from "@/server/projects";
+import { listComponents, listPlatforms, listProjectMembers, listVersions } from "@/server/projects";
 
 export default function ProjectBugsPage({ params, searchParams }: PageProps<"/o/[org]/p/[key]">) {
   return (
@@ -33,6 +33,7 @@ async function ProjectBugs({ params, searchParams }: Pick<PageProps<"/o/[org]/p/
     status: param(sp.status) || "open",
     version: param(sp.version),
     component: param(sp.component),
+    platform: param(sp.platform),
     assignee: param(sp.assignee),
     severity: param(sp.severity),
     sort: param(sp.sort) || "updated",
@@ -40,10 +41,11 @@ async function ProjectBugs({ params, searchParams }: Pick<PageProps<"/o/[org]/p/
   const page = Math.max(1, Number(param(sp.page)) || 1);
   const filters: BugFilters = { ...values, status: values.status === "all" ? "" : values.status, sort: values.sort as BugFilters["sort"], page };
 
-  const [{ items, total }, statuses, versions, components, members] = await Promise.all([
+  const [{ items, total, platformCounts }, statuses, versions, platforms, components, members] = await Promise.all([
     listBugs(ctx.org.id, project.id, ctx.user.id, filters),
     listStatuses(ctx.org.id),
     listVersions(ctx.org.id, project.id),
+    listPlatforms(ctx.org.id, project.id),
     listComponents(ctx.org.id, project.id),
     listProjectMembers(ctx.org.id, project.id),
   ]);
@@ -87,12 +89,27 @@ async function ProjectBugs({ params, searchParams }: Pick<PageProps<"/o/[org]/p/
       ],
     },
   ];
-  const pageHref = (n: number) => {
+  const listHref = (patch: Partial<typeof values>, n = 1) => {
     const qs = new URLSearchParams();
-    for (const [k, v] of Object.entries(values)) if (v && !(k === "status" && v === "open") && !(k === "sort" && v === "updated")) qs.set(k, v);
+    for (const [k, v] of Object.entries({ ...values, ...patch })) {
+      if (v && !(k === "status" && v === "open") && !(k === "sort" && v === "updated")) qs.set(k, v);
+    }
     if (n > 1) qs.set("page", String(n));
     return `${base}${qs.size ? `?${qs}` : ""}`;
   };
+  const pageHref = (n: number) => listHref({}, n);
+
+  // One tab per platform (in the order they were added), counting bugs under the other filters.
+  const countFor = (id: string | null) => platformCounts.find((c) => c.platformId === id)?.n ?? 0;
+  const tabs = platforms.length
+    ? [
+        { value: "", name: "All platforms", count: platformCounts.reduce((n, c) => n + c.n, 0) },
+        ...platforms.map((p) => ({ value: p.id, name: p.name, count: countFor(p.id) })),
+        // Older bugs, or bugs on a platform that was since removed.
+        ...(countFor(null) > 0 || values.platform === "none" ? [{ value: "none", name: "No platform", count: countFor(null) }] : []),
+      ]
+    : [];
+  const showPlatform = tabs.length > 0 && !values.platform;
 
   return (
     <div className="space-y-5">
@@ -116,7 +133,9 @@ async function ProjectBugs({ params, searchParams }: Pick<PageProps<"/o/[org]/p/
             </Link>
           )}
           {permissions.has("bug.create") && versions.length > 0 && (
-            <Link href={`${base}/bugs/new`} className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-neutral-800">
+            <Link
+              href={`${base}/bugs/new${platforms.some((p) => p.id === values.platform) ? `?platform=${values.platform}` : ""}`}
+              className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-neutral-800">
               Report bug
             </Link>
           )}
@@ -135,6 +154,24 @@ async function ProjectBugs({ params, searchParams }: Pick<PageProps<"/o/[org]/p/
         </div>
       ) : (
         <>
+          {tabs.length > 0 && (
+            <nav className="-mx-4 flex gap-1.5 overflow-x-auto px-4 pb-1" aria-label="Platforms">
+              {tabs.map((t) => (
+                <Link
+                  key={t.value || "all"}
+                  href={listHref({ platform: t.value })}
+                  aria-current={values.platform === t.value ? "page" : undefined}
+                  className={`shrink-0 rounded-md border px-2.5 py-1.5 text-xs font-medium ${
+                    values.platform === t.value
+                      ? "border-accent bg-accent text-white"
+                      : "border-line bg-surface text-muted hover:border-neutral-400 hover:text-foreground"
+                  }`}
+                >
+                  {t.name} <span className="opacity-70">{t.count}</span>
+                </Link>
+              ))}
+            </nav>
+          )}
           <TrackerFilters basePath={base} values={values} selects={selects} placeholder="Search titles and descriptions, or jump to a bug number" />
           <p className="text-sm font-medium">
             {total.toLocaleString()} {total === 1 ? "bug" : "bugs"}
@@ -149,7 +186,7 @@ async function ProjectBugs({ params, searchParams }: Pick<PageProps<"/o/[org]/p/
             <div className="rounded-xl border border-line bg-surface">
               <div className={`hidden gap-4 rounded-t-xl border-b border-line bg-surface-2 px-4 py-2 text-xs font-medium uppercase tracking-wide text-muted md:grid ${GRID}`}>
                 <span>Key</span>
-                <span>Feature</span>
+                <span>{showPlatform ? "Platform · Feature" : "Feature"}</span>
                 <span>Bug</span>
                 <span>Severity</span>
                 <span>Status</span>
@@ -163,6 +200,7 @@ async function ProjectBugs({ params, searchParams }: Pick<PageProps<"/o/[org]/p/
                       bug={b}
                       projectKey={project.key}
                       href={`${base}/bugs/${b.number}`}
+                      showPlatform={showPlatform}
                       status={
                         permissions.has("bug.change_status") ? { org, statuses: statusOptions, canVerify: permissions.has("bug.verify") } : null
                       }
@@ -206,7 +244,20 @@ interface StatusEditing {
   canVerify: boolean;
 }
 
-function BugRow({ bug: b, projectKey, href, status: editing }: { bug: BugListItem; projectKey: string; href: string; status: StatusEditing | null }) {
+function BugRow({
+  bug: b,
+  projectKey,
+  href,
+  showPlatform,
+  status: editing,
+}: {
+  bug: BugListItem;
+  projectKey: string;
+  href: string;
+  /** On the "All platforms" tab, say which platform each bug is on. */
+  showPlatform: boolean;
+  status: StatusEditing | null;
+}) {
   const key = `${projectKey}-${b.number}`;
   // People who can move bugs change the status right here; everyone else sees it read-only.
   const status = editing ? (
@@ -231,8 +282,9 @@ function BugRow({ bug: b, projectKey, href, status: editing }: { bug: BugListIte
     <div className={`relative grid grid-cols-[1fr_auto] gap-x-4 gap-y-1.5 px-4 py-3 text-sm hover:bg-surface-2 md:items-center md:gap-y-0 ${GRID}`}>
       <span className="font-mono text-xs text-muted">{key}</span>
       <span className="text-right md:hidden">{status}</span>
-      <span className="col-span-2 min-w-0 truncate text-xs font-medium md:col-span-1">
-        {b.componentName ?? <span className="font-normal text-muted">No feature</span>}
+      <span className="col-span-2 min-w-0 text-xs md:col-span-1">
+        {showPlatform && <span className="block truncate text-muted">{b.platformName ?? "No platform"}</span>}
+        <span className="block truncate font-medium">{b.componentName ?? <span className="font-normal text-muted">No feature</span>}</span>
       </span>
       <div className="col-span-2 min-w-0 md:col-span-1">
         <Link

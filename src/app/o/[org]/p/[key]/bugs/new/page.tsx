@@ -3,26 +3,29 @@ import { notFound } from "next/navigation";
 import { Suspense } from "react";
 import { ReportBugForm } from "@/components/report-bug-form";
 import { getOrgContext, getProjectAccess } from "@/server/access";
-import { listComponents, listProjectMembers, listVersions } from "@/server/projects";
+import { listComponents, listPlatforms, listProjectMembers, listVersions } from "@/server/projects";
 
 export const metadata = { title: "Report a bug — UpTrack" };
 
-export default function ReportBugPage({ params }: PageProps<"/o/[org]/p/[key]/bugs/new">) {
+export default function ReportBugPage({ params, searchParams }: PageProps<"/o/[org]/p/[key]/bugs/new">) {
   return (
     <div className="mx-auto max-w-3xl space-y-6">
       <Suspense fallback={<div className="h-96 animate-pulse rounded-xl bg-surface-2" />}>
-        <Content params={params} />
+        <Content params={params} searchParams={searchParams} />
       </Suspense>
     </div>
   );
 }
 
-async function Content({ params }: Pick<PageProps<"/o/[org]/p/[key]/bugs/new">, "params">) {
+async function Content({ params, searchParams }: Pick<PageProps<"/o/[org]/p/[key]/bugs/new">, "params" | "searchParams">) {
   const { org, key } = await params;
+  // Coming from a platform's tab in the bug list preselects that platform.
+  const wanted = (await searchParams).platform;
   const [ctx, access] = await Promise.all([getOrgContext(org), getProjectAccess(org, key)]);
   if (!access.permissions.has("bug.create")) notFound();
-  const [versions, components, members] = await Promise.all([
+  const [versions, platforms, components, members] = await Promise.all([
     listVersions(ctx.org.id, access.project.id),
+    listPlatforms(ctx.org.id, access.project.id),
     listComponents(ctx.org.id, access.project.id),
     access.permissions.has("bug.assign") ? listProjectMembers(ctx.org.id, access.project.id) : Promise.resolve([]),
   ]);
@@ -66,6 +69,8 @@ async function Content({ params }: Pick<PageProps<"/o/[org]/p/[key]/bugs/new">, 
             project={access.project.key}
             versions={usable.map((v) => ({ id: v.id, name: v.name, status: v.status }))}
             defaultVersionId={defaultVersion.id}
+            platforms={platforms.map((p) => ({ id: p.id, name: p.name }))}
+            defaultPlatformId={platforms.find((p) => p.id === wanted)?.id}
             components={components.map((c) => ({ id: c.id, name: c.name }))}
             members={members.map((m) => ({ id: m.userId, name: m.fullName }))}
           />

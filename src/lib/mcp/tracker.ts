@@ -45,6 +45,12 @@ export async function listProjectsTool(caller: TokenCaller): Promise<ToolResult>
       [caller.orgId],
     ),
   );
+  const platforms = await inOrg(caller.orgId, (tx) =>
+    tx.query<{ project_id: string; name: string }>(
+      "select project_id, name from project_platforms where organization_id = $1 and archived_at is null order by position, created_at",
+      [caller.orgId],
+    ),
+  );
   return json({
     organization: caller.orgName,
     projects: projects.map((p) => ({
@@ -54,6 +60,7 @@ export async function listProjectsTool(caller: TokenCaller): Promise<ToolResult>
       open_bugs: p.openBugs,
       total_bugs: p.totalBugs,
       versions: versions.filter((v) => v.project_id === p.id).map((v) => `${v.name} (${v.status})`),
+      platforms: platforms.filter((pl) => pl.project_id === p.id).map((pl) => pl.name),
     })),
   });
 }
@@ -61,6 +68,7 @@ export async function listProjectsTool(caller: TokenCaller): Promise<ToolResult>
 export interface TrackerSearchArgs {
   project?: string;
   version?: string;
+  platform?: string;
   feature?: string;
   /** Older name for feature. */
   module?: string;
@@ -88,6 +96,7 @@ export async function searchTracker(caller: TokenCaller, args: TrackerSearchArgs
   };
   if (args.project) add("p.key = upper(?)", args.project);
   if (args.version) add("v.name ilike ?", args.version);
+  if (args.platform) add("pl.name ilike '%' || ? || '%'", args.platform);
   const feature = args.feature ?? args.module;
   if (feature) add("c.name ilike '%' || ? || '%'", feature);
   if (args.open_only) where.push("s.category <> 'done'");
@@ -107,11 +116,12 @@ export async function searchTracker(caller: TokenCaller, args: TrackerSearchArgs
     join workflow_statuses s on s.id = b.status_id
     join project_versions v on v.id = b.found_in_version_id
     left join project_components c on c.id = b.component_id
+    left join project_platforms pl on pl.id = b.platform_id
     left join users a on a.id = b.assignee_id`;
   return inOrg(caller.orgId, async (tx) => {
     const rows = await tx.query<Record<string, unknown>>(
       `select p.key || '-' || b.number as id, b.title, s.name as status, s.category <> 'done' as open, b.resolution,
-              b.severity, b.priority, a.full_name as assignee, v.name as found_in, c.name as feature,
+              b.severity, b.priority, a.full_name as assignee, v.name as found_in, pl.name as platform, c.name as feature,
               (select count(*)::int from bug_attachments x where x.bug_id = b.id and x.kind in ('image', 'video') and x.deleted_at is null) as references,
               exists (select 1 from bug_captures bc where bc.bug_id = b.id) as has_api_log
          ${from} where ${whereSql}
@@ -142,6 +152,7 @@ export async function getTrackerBug(caller: TokenCaller, key: string, baseUrl: s
     ["Priority", PRIORITY_LABEL[bug.priority]],
     ["Found in version", bug.foundInVersionName],
     ["Fixed in version", bug.fixedInVersionName],
+    ["Platform", bug.platformName],
     ["Feature", bug.componentName],
     ["Reported by", bug.reporterName],
     ["Assignee", bug.assigneeName ?? "nobody"],
@@ -240,13 +251,23 @@ export async function getTrackerLogs(
 
 export async function trackerSummary(caller: TokenCaller, project?: string): Promise<ToolResult> {
   return inOrg(caller.orgId, async (tx) => {
-    const rows = await tx.query<{ project: string; status: string; open: boolean; severity: string; assignee: string | null; feature: string | null }>(
-      `select p.key as project, s.name as status, s.category <> 'done' as open, b.severity, a.full_name as assignee, c.name as feature
+    const rows = await tx.query<{
+      project: string;
+      status: string;
+      open: boolean;
+      severity: string;
+      assignee: string | null;
+      platform: string | null;
+      feature: string | null;
+    }>(
+      `select p.key as project, s.name as status, s.category <> 'done' as open, b.severity, a.full_name as assignee,
+              pl.name as platform, c.name as feature
          from bugs b
          join projects p on p.id = b.project_id and p.deleted_at is null
          join workflow_statuses s on s.id = b.status_id
          left join users a on a.id = b.assignee_id
          left join project_components c on c.id = b.component_id
+         left join project_platforms pl on pl.id = b.platform_id
         where b.organization_id = $1 and b.deleted_at is null
           and ($3 or exists (select 1 from project_members pm where pm.project_id = p.id and pm.user_id = $2))
           and ($4::text is null or p.key = upper($4))`,
@@ -265,6 +286,7 @@ export async function trackerSummary(caller: TokenCaller, project?: string): Pro
       open_by_project: tally(open, (r) => r.project),
       open_by_severity: tally(open, (r) => r.severity),
       open_by_assignee: tally(open, (r) => r.assignee),
+      ...(rows.some((r) => r.platform) ? { open_by_platform: tally(open, (r) => r.platform) } : {}),
       open_by_feature: tally(open, (r) => r.feature),
       by_status: tally(rows, (r) => r.status),
     });

@@ -2,7 +2,7 @@ import "server-only";
 import type { ReportableProject } from "@/lib/capture-types";
 import { inOrg } from "./db";
 
-/** Projects someone can report bugs to (bug.create), with active versions and features, for the extension. */
+/** Projects someone can report bugs to (bug.create), with active versions, platforms and features, for the extension. */
 export async function listReportableProjects(
   org: { id: string; slug: string; name: string },
   userId: string,
@@ -25,6 +25,11 @@ export async function listReportableProjects(
         where project_id = any($1::uuid[]) and status <> 'archived' order by sort_order desc, created_at desc`,
       [ids],
     );
+    const platforms = await tx.query<{ project_id: string; id: string; name: string }>(
+      `select project_id, id, name from project_platforms
+        where project_id = any($1::uuid[]) and archived_at is null order by position, created_at`,
+      [ids],
+    );
     const components = await tx.query<{ project_id: string; id: string; name: string }>(
       `select project_id, id, name from project_components
         where project_id = any($1::uuid[]) and archived_at is null order by lower(name)`,
@@ -34,6 +39,7 @@ export async function listReportableProjects(
       ...p,
       organization: { slug: org.slug, name: org.name },
       versions: versions.filter((v) => v.project_id === p.id).map(({ id, name, status }) => ({ id, name, status })),
+      platforms: platforms.filter((pl) => pl.project_id === p.id).map(({ id, name }) => ({ id, name })),
       components: components.filter((c) => c.project_id === p.id).map(({ id, name }) => ({ id, name })),
     }));
   });

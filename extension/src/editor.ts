@@ -4,7 +4,7 @@ import { Annotator, type Tool } from "./annotate";
 import { ApiError, fetchProjects, SignInRequired, upload } from "./shared/api";
 import { deleteDraft, getDraft } from "./shared/drafts";
 import { getSettings, signInUrl } from "./shared/settings";
-import { describeUserAgent, isFailed, PRIORITIES, SEVERITIES, type CaptureLog, type Draft, type PageInfo, type ReportableProject } from "./shared/types";
+import { describeUserAgent, isFailed, SEVERITIES, type CaptureLog, type Draft, type PageInfo, type ReportableProject } from "./shared/types";
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const COLORS = ["#e11d48", "#f97316", "#facc15", "#16a34a", "#2563eb", "#0a0a0a"];
@@ -39,7 +39,22 @@ function fillSelect(id: string, options: { value: string; label: string }[], sel
 let projects: ReportableProject[] = [];
 const LAST_CHOICE = "lastReportTarget";
 
-function showVersions(projectId: string, preferred: { versionId?: string; componentId?: string } = {}) {
+/** A required picker that starts on a disabled "Choose a …" line, or on a remembered choice still offered. */
+function fillChoice(id: string, items: { id: string; name: string }[], prompt: string, remembered?: string) {
+  const placeholder = new Option(prompt, "", true, true);
+  placeholder.disabled = true;
+  const pick = items.some((i) => i.id === remembered) ? remembered : "";
+  $<HTMLSelectElement>(id).replaceChildren(placeholder, ...items.map((i) => new Option(i.name, i.id, false, i.id === pick)));
+}
+
+interface LastChoice {
+  projectId?: string;
+  versionId?: string;
+  platformId?: string;
+  componentId?: string;
+}
+
+function showVersions(projectId: string, preferred: LastChoice = {}) {
   const project = projects.find((p) => p.id === projectId);
   const versions = project?.versions ?? [];
   // Default to what the reporter used last, else whatever QA is testing now.
@@ -49,13 +64,14 @@ function showVersions(projectId: string, preferred: { versionId?: string; compon
     versions.map((v) => ({ value: v.id, label: `${v.name}${v.status === "in_testing" ? " (in testing)" : ""}` })),
     pick?.id ?? "",
   );
+  // Projects that cover several products (admin panel, website, app) need the platform too.
+  const platforms = project?.platforms ?? [];
+  $("platform-field").hidden = platforms.length === 0;
+  $<HTMLSelectElement>("platform").required = platforms.length > 0;
+  fillChoice("platform", platforms, "Choose a platform", preferred.platformId);
   // Every bug names its feature; a project without any can't take reports yet.
   const features = project?.components ?? [];
-  const select = $<HTMLSelectElement>("module");
-  const placeholder = new Option(features.length ? "Choose a feature" : "No features yet", "", true, true);
-  placeholder.disabled = true;
-  const remembered = features.some((c) => c.id === preferred.componentId) ? preferred.componentId! : "";
-  select.replaceChildren(placeholder, ...features.map((c) => new Option(c.name, c.id, false, c.id === remembered)));
+  fillChoice("module", features, features.length ? "Choose a feature" : "No features yet", preferred.componentId);
   const missing = $("feature-missing");
   missing.textContent = project
     ? `${project.name} has no features yet, and every bug names one. Ask a project manager to add them in the project's settings.`
@@ -111,7 +127,7 @@ async function loadProjects() {
   $("projects-error").hidden = true;
   $<HTMLButtonElement>("submit").disabled = !$("load-error").hidden;
   projectsReady = true;
-  const last = ((await chrome.storage.local.get(LAST_CHOICE))[LAST_CHOICE] ?? {}) as { projectId?: string; versionId?: string; componentId?: string };
+  const last = ((await chrome.storage.local.get(LAST_CHOICE))[LAST_CHOICE] ?? {}) as LastChoice;
   const projectId = projects.some((p) => p.id === last.projectId) ? last.projectId! : projects[0].id;
   fillProjects(projectId);
   showVersions(projectId, last);
@@ -409,9 +425,9 @@ $("form").addEventListener("submit", async (e) => {
       description: $<HTMLTextAreaElement>("description").value.trim(),
       projectId: $<HTMLSelectElement>("project").value,
       versionId: $<HTMLSelectElement>("version").value,
+      platformId: $<HTMLSelectElement>("platform").value || undefined,
       componentId: $<HTMLSelectElement>("module").value,
       severity: $<HTMLSelectElement>("severity").value,
-      priority: $<HTMLSelectElement>("priority").value,
       // Page details can be missing when the tab closed before a recording finished.
       page: draft.page ?? {
         url: "unknown",
@@ -440,7 +456,8 @@ $("form").addEventListener("submit", async (e) => {
     const result = await upload(settings, form, (f) => ($("progress-bar").style.width = `${Math.round(f * 100)}%`));
     submitted = true;
     await deleteDraft(draft.id).catch(() => {});
-    await chrome.storage.local.set({ [LAST_CHOICE]: { projectId: meta.projectId, versionId: meta.versionId, componentId: meta.componentId } });
+    const last: LastChoice = { projectId: meta.projectId, versionId: meta.versionId, platformId: meta.platformId, componentId: meta.componentId };
+    await chrome.storage.local.set({ [LAST_CHOICE]: last });
 
     $("form").hidden = true;
     $("done").hidden = false;
@@ -482,7 +499,6 @@ window.addEventListener("beforeunload", (e) => {
 
 (async () => {
   fillSelect("severity", SEVERITIES.map((v) => ({ value: v, label: capitalize(v) })), "medium");
-  fillSelect("priority", PRIORITIES.map((v) => ({ value: v, label: capitalize(v) })), "medium");
   const projectsLoaded = loadProjects();
   const id = new URLSearchParams(location.search).get("draft");
   const found = id ? await getDraft(id) : undefined;

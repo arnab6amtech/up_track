@@ -45,6 +45,7 @@ export function createMcpServer({ baseUrl, caller }: { baseUrl: string; caller: 
       inputSchema: {
         project: z.string().optional().describe("Project key, e.g. UPT."),
         version: z.string().optional().describe("Version the bug was found in, e.g. 1.0."),
+        platform: z.string().optional().describe("Platform the bug was found on, e.g. Admin panel or User app."),
         feature: z.string().optional().describe("Feature the bug is in, e.g. Checkout."),
         module: z.string().optional().describe("Spreadsheets only: the module column."),
         open_only: z.boolean().optional().describe("Only bugs that aren't done yet."),
@@ -132,7 +133,7 @@ export function createMcpServer({ baseUrl, caller }: { baseUrl: string; caller: 
     "get_summary",
     {
       title: "Bug summary",
-      description: "Open bugs by project, severity, assignee and feature, plus totals by status. Good for picking what to work on.",
+      description: "Open bugs by project, severity, assignee, platform and feature, plus totals by status. Good for picking what to work on.",
       inputSchema: { project: z.string().optional().describe("Limit to one project key."), workbook: workbookArg },
       annotations: READ_ONLY,
     },

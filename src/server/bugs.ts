@@ -48,6 +48,8 @@ export interface BugFilters {
   status?: string;
   version?: string;
   component?: string;
+  /** A platform id, or "none" for bugs without one. */
+  platform?: string;
   /** A user id, "me" or "none". */
   assignee?: string;
   severity?: string;
@@ -70,6 +72,8 @@ export interface BugListItem {
   assigneeName: string | null;
   versionName: string;
   componentName: string | null;
+  platformId: string | null;
+  platformName: string | null;
   /** Screenshots and recordings, oldest first, for the list's reference column. */
   media: ListMedia[];
   hasCapture: boolean;
@@ -83,7 +87,14 @@ export type ListMedia = Pick<Attachment, "id" | "kind" | "fileName" | "trimStart
 
 export const BUGS_PAGE_SIZE = 50;
 
-export async function listBugs(orgId: string, projectId: string, userId: string, f: BugFilters): Promise<{ items: BugListItem[]; total: number }> {
+export interface BugList {
+  items: BugListItem[];
+  total: number;
+  /** Bugs matching every filter except the platform, per platform (null: no platform), for the list's tabs. */
+  platformCounts: { platformId: string | null; n: number }[];
+}
+
+export async function listBugs(orgId: string, projectId: string, userId: string, f: BugFilters): Promise<BugList> {
   const params: unknown[] = [projectId];
   const where = ["b.project_id = $1", "b.deleted_at is null"];
   const add = (sql: string, value: unknown) => {
@@ -111,6 +122,11 @@ export async function listBugs(orgId: string, projectId: string, userId: string,
   else if (f.assignee) add("b.assignee_id = ?::uuid", f.assignee);
   if (f.severity && (SEVERITIES as readonly string[]).includes(f.severity)) add("b.severity = ?::bug_severity", f.severity);
   if (f.priority && (PRIORITIES as readonly string[]).includes(f.priority)) add("b.priority = ?::bug_priority", f.priority);
+  // The tabs count bugs per platform under all the other filters.
+  const tabWhere = where.join(" and ");
+  const tabParams = [...params];
+  if (f.platform === "none") where.push("b.platform_id is null");
+  else if (f.platform) add("b.platform_id = ?::uuid", f.platform);
 
   const order =
     f.sort === "created" ? "b.number desc" : f.sort === "severity" ? "b.severity, b.updated_at desc" : "b.updated_at desc";
@@ -121,12 +137,14 @@ export async function listBugs(orgId: string, projectId: string, userId: string,
     const rows = await tx.query<Omit<BugListItem, "media">>(
       `select b.id, b.number, b.title, b.status_id as "statusId", s.name as "statusName", s.category as "statusCategory", s.color as "statusColor",
               b.severity, b.priority, b.resolution, a.full_name as "assigneeName", v.name as "versionName", c.name as "componentName",
+              b.platform_id as "platformId", pl.name as "platformName",
               exists (select 1 from bug_captures bc where bc.bug_id = b.id) as "hasCapture",
               b.lock_version as "lockVersion", b.created_at as "createdAt", b.updated_at as "updatedAt"
          from bugs b
          join workflow_statuses s on s.id = b.status_id
          join project_versions v on v.id = b.found_in_version_id
          left join project_components c on c.id = b.component_id
+         left join project_platforms pl on pl.id = b.platform_id
          left join users a on a.id = b.assignee_id
         where ${whereSql}
         order by ${order}
@@ -148,7 +166,14 @@ export async function listBugs(orgId: string, projectId: string, userId: string,
         )
       : [];
     const items = rows.map((r) => ({ ...r, media: media.filter((m) => m.bugId === r.id) }));
-    return { items, total: total?.n ?? 0 };
+    const platformCounts = await tx.query<{ platformId: string | null; n: number }>(
+      `select b.platform_id as "platformId", count(*)::int as n
+         from bugs b join workflow_statuses s on s.id = b.status_id
+        where ${tabWhere}
+        group by b.platform_id`,
+      tabParams,
+    );
+    return { items, total: total?.n ?? 0, platformCounts };
   });
 }
 
@@ -212,6 +237,8 @@ export interface BugDetail {
   fixedInVersionName: string | null;
   componentId: string | null;
   componentName: string | null;
+  platformId: string | null;
+  platformName: string | null;
   reporterId: string;
   reporterName: string;
   assigneeId: string | null;
@@ -233,6 +260,7 @@ const DETAIL_SQL = `
          b.found_in_version_id as "foundInVersionId", fv.name as "foundInVersionName",
          b.fixed_in_version_id as "fixedInVersionId", xv.name as "fixedInVersionName",
          b.component_id as "componentId", c.name as "componentName",
+         b.platform_id as "platformId", pl.name as "platformName",
          b.reporter_id as "reporterId", ru.full_name as "reporterName", b.assignee_id as "assigneeId", au.full_name as "assigneeName",
          b.source, b.lock_version as "lockVersion", b.resolved_at as "resolvedAt", b.created_at as "createdAt", b.updated_at as "updatedAt"
     from bugs b
@@ -241,6 +269,7 @@ const DETAIL_SQL = `
     join project_versions fv on fv.id = b.found_in_version_id
     left join project_versions xv on xv.id = b.fixed_in_version_id
     left join project_components c on c.id = b.component_id
+    left join project_platforms pl on pl.id = b.platform_id
     join users ru on ru.id = b.reporter_id
     left join users au on au.id = b.assignee_id`;
 
@@ -304,6 +333,7 @@ export interface NewBug {
   environment?: string;
   foundInVersionId: string;
   componentId?: string | null;
+  platformId?: string | null;
   severity?: Severity;
   priority?: Priority;
   assigneeId?: string | null;
@@ -342,9 +372,9 @@ export async function createBug(orgId: string, input: NewBug): Promise<{ id: str
         tx,
         `insert into bugs (organization_id, project_id, title, description, steps_to_reproduce, expected_result, actual_result,
                            environment, found_in_version_id, component_id, severity, priority, reporter_id, assignee_id, source,
-                           external_ref, created_at, updated_at)
+                           external_ref, created_at, updated_at, platform_id)
          values ($1, $2, $3, nullif($4, ''), nullif($5, ''), nullif($6, ''), nullif($7, ''), nullif($8, ''), $9, $10,
-                 $11::bug_severity, $12::bug_priority, $13, $14, $15::bug_source, $16, coalesce($17, now()), coalesce($17, now()))
+                 $11::bug_severity, $12::bug_priority, $13, $14, $15::bug_source, $16, coalesce($17, now()), coalesce($17, now()), $18)
          returning id, number`,
         [
           orgId,
@@ -364,6 +394,7 @@ export async function createBug(orgId: string, input: NewBug): Promise<{ id: str
           input.source ?? "manual",
           input.externalRef ?? null,
           input.createdAt ?? null,
+          input.platformId || null,
         ],
       );
       const { id: bugId } = bug!;
@@ -447,6 +478,7 @@ export interface BugChanges {
   assigneeId?: string | null;
   fixedInVersionId?: string | null;
   componentId?: string | null;
+  platformId?: string | null;
 }
 
 const COLUMNS: Record<keyof BugChanges, { column: string; cast?: string; label: string }> = {
@@ -463,6 +495,7 @@ const COLUMNS: Record<keyof BugChanges, { column: string; cast?: string; label: 
   assigneeId: { column: "assignee_id", cast: "uuid", label: "assignee" },
   fixedInVersionId: { column: "fixed_in_version_id", cast: "uuid", label: "fixed in" },
   componentId: { column: "component_id", cast: "uuid", label: "feature" },
+  platformId: { column: "platform_id", cast: "uuid", label: "platform" },
 };
 
 /**
@@ -490,6 +523,7 @@ export async function updateBug(orgId: string, bugId: string, actorId: string, l
       assigneeId: before.assigneeId,
       fixedInVersionId: before.fixedInVersionId,
       componentId: before.componentId,
+      platformId: before.platformId,
     };
     const changed = (Object.keys(changes) as (keyof BugChanges)[]).filter(
       (k) => changes[k] !== undefined && (changes[k] || null) !== (current[k] || null),
@@ -510,6 +544,7 @@ export async function updateBug(orgId: string, bugId: string, actorId: string, l
       assigneeId: [before.assigneeName, after.assigneeName],
       fixedInVersionId: [before.fixedInVersionName, after.fixedInVersionName],
       componentId: [before.componentName, after.componentName],
+      platformId: [before.platformName, after.platformName],
     };
     // The status trigger may clear the resolution on reopen; record what actually happened.
     if (before.resolution !== after.resolution && !changed.includes("resolution")) changed.push("resolution");

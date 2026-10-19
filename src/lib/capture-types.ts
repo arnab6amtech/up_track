@@ -48,6 +48,8 @@ export interface CaptureLog {
 export interface CaptureUploadMeta {
   projectId: string;
   versionId: string;
+  /** Required when the project has platforms. */
+  platformId?: string;
   componentId?: string;
   title: string;
   description?: string;
@@ -72,6 +74,8 @@ export interface ReportableProject {
   name: string;
   organization: { slug: string; name: string };
   versions: { id: string; name: string; status: string }[];
+  /** Empty when the project doesn't split into platforms. */
+  platforms: { id: string; name: string }[];
   components: { id: string; name: string }[];
 }
 

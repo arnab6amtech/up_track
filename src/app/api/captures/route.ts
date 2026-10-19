@@ -24,6 +24,7 @@ const ms = z.number().int().min(0).max(24 * 60 * 60 * 1000);
 const metaSchema = z.object({
   projectId: z.string().uuid("Pick a project."),
   versionId: z.string().uuid("Pick the version you found it in."),
+  platformId: z.string().uuid().optional().or(z.literal("")),
   componentId: z.string().uuid().optional().or(z.literal("")),
   title: z.string().trim().min(1, "Give the bug a title.").max(300),
   description: str(20_000).optional(),
@@ -131,7 +132,7 @@ export async function POST(request: Request) {
     return fail(400, "Bug details aren't valid JSON.");
   }
 
-  // The project must be one this person may report to, and the version and feature must belong to it.
+  // The project must be one this person may report to, and the version, platform and feature must belong to it.
   let found: { org: (typeof reporter.orgs)[number]; project: ReportableProject } | undefined;
   for (const org of reporter.orgs) {
     const project = (await listReportableProjects(org, reporter.userId, org.isAdmin)).find((p) => p.id === meta.projectId);
@@ -146,6 +147,8 @@ export async function POST(request: Request) {
   if (project.components.length === 0) {
     return fail(400, `${project.name} has no features yet. Ask a project manager to add them in the project's settings.`);
   }
+  if (project.platforms.length > 0 && !meta.platformId) return fail(400, "Pick the platform you found it on.");
+  if (meta.platformId && !project.platforms.some((p) => p.id === meta.platformId)) return fail(400, "That platform isn't part of the project.");
   if (!meta.componentId) return fail(400, "Pick the feature this bug is in.");
   if (!project.components.some((c) => c.id === meta.componentId)) return fail(400, "That feature isn't part of the project.");
 
@@ -165,6 +168,7 @@ export async function POST(request: Request) {
     description: meta.description,
     foundInVersionId: meta.versionId,
     componentId: meta.componentId || null,
+    platformId: meta.platformId || null,
     severity: meta.severity,
     priority: meta.priority,
     source: "browser_extension",

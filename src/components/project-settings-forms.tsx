@@ -3,6 +3,7 @@
 import { useActionState } from "react";
 import {
   createComponentAction,
+  createPlatformAction,
   createVersionAction,
   setProjectMemberAction,
   setVersionStatusAction,
@@ -95,6 +96,20 @@ export function VersionStatusSelect({ ids, versionId, status }: { ids: Ids; vers
         ))}
       </select>
       {state.error && <span className="text-xs text-red-700">{state.error}</span>}
+    </form>
+  );
+}
+
+export function AddPlatformForm({ ids }: { ids: Ids }) {
+  const [state, action] = useActionState<ActionState, FormData>(createPlatformAction, {});
+  return (
+    <form key={state.success} action={action} className="space-y-2">
+      <Hidden {...ids} />
+      <div className="flex gap-2">
+        <input name="name" required maxLength={100} placeholder="Admin panel" aria-label="Platform name" className={inputClass} />
+        <SubmitButton pendingText="Adding…">Add platform</SubmitButton>
+      </div>
+      <FormMessage error={state.error} />
     </form>
   );
 }

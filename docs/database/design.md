@@ -8,6 +8,7 @@ Later migrations add to it:
 
 - [`0002_sessions.sql`](../../db/migrations/0002_sessions.sql): web sign-in sessions (`sessions`), stored as a SHA-256 hash of the cookie value with an expiry.
 - [`0003_attachment_trim.sql`](../../db/migrations/0003_attachment_trim.sql): `trim_start_ms` and `trim_end_ms` on `bug_attachments`, the part of a recording viewers are shown.
+- [`0004_platforms.sql`](../../db/migrations/0004_platforms.sql): `project_platforms` (the products a project covers, such as Admin panel or User app, ordered by `position`) and `bugs.platform_id`, with the same composite foreign key and row-level security as features.
 
 The app applies pending migrations on start-up (`src/server/db/migrate.ts`), or run `npm run db:migrate`.
 

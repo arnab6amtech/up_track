@@ -60,6 +60,7 @@ export interface BugListItem {
   id: string;
   number: number;
   title: string;
+  statusId: string;
   statusName: string;
   statusCategory: string;
   statusColor: string | null;
@@ -72,6 +73,8 @@ export interface BugListItem {
   /** Screenshots and recordings, oldest first, for the list's reference column. */
   media: ListMedia[];
   hasCapture: boolean;
+  /** For saving changes made in the list (the status). */
+  lockVersion: number;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -116,10 +119,10 @@ export async function listBugs(orgId: string, projectId: string, userId: string,
 
   return inOrg(orgId, async (tx) => {
     const rows = await tx.query<Omit<BugListItem, "media">>(
-      `select b.id, b.number, b.title, s.name as "statusName", s.category as "statusCategory", s.color as "statusColor",
+      `select b.id, b.number, b.title, b.status_id as "statusId", s.name as "statusName", s.category as "statusCategory", s.color as "statusColor",
               b.severity, b.priority, b.resolution, a.full_name as "assigneeName", v.name as "versionName", c.name as "componentName",
               exists (select 1 from bug_captures bc where bc.bug_id = b.id) as "hasCapture",
-              b.created_at as "createdAt", b.updated_at as "updatedAt"
+              b.lock_version as "lockVersion", b.created_at as "createdAt", b.updated_at as "updatedAt"
          from bugs b
          join workflow_statuses s on s.id = b.status_id
          join project_versions v on v.id = b.found_in_version_id

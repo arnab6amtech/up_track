@@ -3,6 +3,7 @@ import { Suspense } from "react";
 import { CopyFixButton } from "@/components/agent-command";
 import { mediaLinks } from "@/components/capture-details";
 import { ReferenceButton } from "@/components/reference-drawer";
+import { StatusSelect, type StatusOption } from "@/components/status-select";
 import { SeverityBadge, StatusPill } from "@/components/tracker-badges";
 import { TrackerFilters, type FilterSelect } from "@/components/tracker-filters";
 import { RESOLUTION_LABEL, SEVERITY_LABEL } from "@/lib/labels";
@@ -47,6 +48,7 @@ async function ProjectBugs({ params, searchParams }: Pick<PageProps<"/o/[org]/p/
     listProjectMembers(ctx.org.id, project.id),
   ]);
   const base = `/o/${org}/p/${project.key}`;
+  const statusOptions: StatusOption[] = statuses.map((s) => ({ id: s.id, name: s.name, category: s.category, color: s.color }));
   const pages = Math.max(1, Math.ceil(total / BUGS_PAGE_SIZE));
 
   const selects: FilterSelect[] = [
@@ -143,8 +145,9 @@ async function ProjectBugs({ params, searchParams }: Pick<PageProps<"/o/[org]/p/
               {total === 0 && values.status === "open" && !values.q ? "No open bugs. Nice." : "Nothing matches these filters."}
             </div>
           ) : (
-            <div className="overflow-hidden rounded-xl border border-line bg-surface">
-              <div className={`hidden gap-4 border-b border-line bg-surface-2 px-4 py-2 text-xs font-medium uppercase tracking-wide text-muted md:grid ${GRID}`}>
+            // No overflow clipping here: the status menu's resolution prompt hangs below its row.
+            <div className="rounded-xl border border-line bg-surface">
+              <div className={`hidden gap-4 rounded-t-xl border-b border-line bg-surface-2 px-4 py-2 text-xs font-medium uppercase tracking-wide text-muted md:grid ${GRID}`}>
                 <span>Key</span>
                 <span>Feature</span>
                 <span>Bug</span>
@@ -153,10 +156,17 @@ async function ProjectBugs({ params, searchParams }: Pick<PageProps<"/o/[org]/p/
                 <span className="text-right">Reference</span>
                 <span className="text-right">Agent</span>
               </div>
-              <ul className="divide-y divide-line">
+              <ul className="divide-y divide-line [&>li:first-child>div]:rounded-t-xl md:[&>li:first-child>div]:rounded-t-none [&>li:last-child>div]:rounded-b-xl">
                 {items.map((b) => (
                   <li key={b.id}>
-                    <BugRow bug={b} projectKey={project.key} href={`${base}/bugs/${b.number}`} />
+                    <BugRow
+                      bug={b}
+                      projectKey={project.key}
+                      href={`${base}/bugs/${b.number}`}
+                      status={
+                        permissions.has("bug.change_status") ? { org, statuses: statusOptions, canVerify: permissions.has("bug.verify") } : null
+                      }
+                    />
                   </li>
                 ))}
               </ul>
@@ -190,9 +200,30 @@ async function ProjectBugs({ params, searchParams }: Pick<PageProps<"/o/[org]/p/
 
 const GRID = "md:grid-cols-[5rem_10rem_minmax(0,1fr)_6rem_9rem_5rem_4.5rem]";
 
-function BugRow({ bug: b, projectKey, href }: { bug: BugListItem; projectKey: string; href: string }) {
+interface StatusEditing {
+  org: string;
+  statuses: StatusOption[];
+  canVerify: boolean;
+}
+
+function BugRow({ bug: b, projectKey, href, status: editing }: { bug: BugListItem; projectKey: string; href: string; status: StatusEditing | null }) {
   const key = `${projectKey}-${b.number}`;
-  const status = <StatusPill name={b.resolution ? `${b.statusName} · ${RESOLUTION_LABEL[b.resolution]}` : b.statusName} color={b.statusColor} />;
+  // People who can move bugs change the status right here; everyone else sees it read-only.
+  const status = editing ? (
+    <StatusSelect
+      key={b.lockVersion}
+      org={editing.org}
+      project={projectKey}
+      bugId={b.id}
+      lockVersion={b.lockVersion}
+      statusId={b.statusId}
+      resolution={b.resolution}
+      statuses={editing.statuses}
+      canVerify={editing.canVerify}
+    />
+  ) : (
+    <StatusPill name={b.resolution ? `${b.statusName} · ${RESOLUTION_LABEL[b.resolution]}` : b.statusName} color={b.statusColor} />
+  );
   const reference = <ReferenceButton media={mediaLinks(b.media)} title={b.title} refLabel={key} href={href} />;
   const fix = <CopyFixButton id={key} />;
   // The whole row is clickable through the title link's ::after overlay; the buttons sit above it.

@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>New bug report · UpTrack</title>
+    <link rel="stylesheet" href="ui.css" />
+    <link rel="stylesheet" href="editor.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <span class="logo">U</span>
+      <strong>New bug report</strong>
+      <span id="page-host" class="muted small"></span>
+    </header>
+
+    <main class="layout">
+      <section class="stage">
+        <div id="tools" class="toolbar" hidden>
+          <div class="group" role="radiogroup" aria-label="Tool">
+            <button type="button" class="tool active" data-tool="arrow" title="Draw an arrow (A)">Arrow</button>
+            <button type="button" class="tool" data-tool="rect" title="Draw a box (B)">Box</button>
+            <button type="button" class="tool" data-tool="text" title="Click to add text (T)">Text</button>
+            <button type="button" class="tool" data-tool="blur" title="Hide sensitive information (H)">Blur</button>
+          </div>
+          <div class="group" role="radiogroup" aria-label="Color" id="colors"></div>
+          <div class="group push">
+            <button type="button" class="btn btn-sm" id="undo" disabled title="Undo (Ctrl/Cmd+Z)">Undo</button>
+            <button type="button" class="btn btn-sm" id="clear" disabled>Clear all</button>
+          </div>
+        </div>
+        <div id="canvas-wrap" class="canvas-wrap" hidden>
+          <canvas id="canvas"></canvas>
+          <textarea id="text-input" class="text-input" rows="1" hidden></textarea>
+        </div>
+
+        <div id="video-wrap" class="video-wrap" hidden>
+          <video id="video" controls playsinline></video>
+          <div class="trim">
+            <p class="small"><strong>Trim</strong> <span class="muted">Choose the part viewers see. The full recording is kept.</span></p>
+            <div class="trim-row">
+              <button type="button" class="btn btn-sm" id="trim-start">Start here</button>
+              <span class="mono small" id="trim-label">0:00 to 0:00</span>
+              <button type="button" class="btn btn-sm" id="trim-end">End here</button>
+              <button type="button" class="btn btn-sm" id="trim-reset">Reset</button>
+            </div>
+          </div>
+        </div>
+
+        <p id="load-error" class="notice" hidden></p>
+      </section>
+
+      <aside class="panel">
+        <form id="form" class="stack">
+          <div class="field">
+            <label for="title">Title</label>
+            <input id="title" class="input" maxlength="200" placeholder="What went wrong?" required />
+          </div>
+          <div class="field">
+            <label for="description">Description <span class="muted">(optional)</span></label>
+            <textarea id="description" class="input" placeholder="Steps to reproduce, what you expected, what happened"></textarea>
+          </div>
+          <div class="row">
+            <div class="field">
+              <label for="severity">Severity</label>
+              <select id="severity" class="input"></select>
+            </div>
+            <div class="field">
+              <label for="priority">Priority</label>
+              <select id="priority" class="input"></select>
+            </div>
+          </div>
+          <div class="field">
+            <label for="module">Module <span class="muted">(optional)</span></label>
+            <input id="module" class="input" maxlength="120" placeholder="e.g. Checkout" />
+          </div>
+
+          <section class="log">
+            <p class="small"><strong>Attached from the page</strong></p>
+            <p class="small" id="log-summary"></p>
+            <ul id="failed-list" class="failed small mono"></ul>
+            <p id="log-missing" class="notice" hidden>
+              This page was open before the extension was installed, so no API calls were recorded. Reload the page
+              and reproduce the bug to capture them.
+            </p>
+            <label class="check small"><input type="checkbox" id="attach-log" checked /> Attach API calls and console log</label>
+          </section>
+
+          <p id="submit-error" class="error" hidden></p>
+          <div id="progress" class="progress" hidden><div id="progress-bar"></div></div>
+          <button type="submit" class="btn btn-primary" id="submit">Create bug</button>
+        </form>
+
+        <section id="done" class="stack" hidden>
+          <p class="done-title">Bug reported</p>
+          <p class="small muted" id="done-sub"></p>
+          <div class="field">
+            <label for="share">Share link</label>
+            <div class="copy-row">
+              <input id="share" class="input mono small" readonly />
+              <button type="button" class="btn btn-primary btn-sm" id="copy-share">Copy</button>
+            </div>
+          </div>
+          <div class="field">
+            <label for="fix">Fix it with your AI agent</label>
+            <div class="copy-row">
+              <input id="fix" class="input mono small" readonly />
+              <button type="button" class="btn btn-sm" id="copy-fix">Copy</button>
+            </div>
+          </div>
+          <a id="open-bug" class="btn" target="_blank" rel="noreferrer">Open in UpTrack</a>
+          <button type="button" class="btn" id="close-tab">Close this tab</button>
+        </section>
+      </aside>
+    </main>
+
+    <script src="editor.js"></script>
+  </body>
+</html>

@@ -102,6 +102,8 @@ async function fromDisk(filePath: string, title: string, source: string): Promis
 
 export async function loadWorkbookFile(source: WorkbookSource): Promise<WorkbookFile> {
   switch (source.type) {
+    case "captures":
+      throw new Error("Reported bugs aren't stored in a spreadsheet file.");
     case "drive":
       return fromDrive(source.fileId);
     case "upload":

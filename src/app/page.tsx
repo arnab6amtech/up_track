@@ -72,9 +72,11 @@ async function BugList({ searchParams }: { searchParams: PageProps<"/">["searchP
           </p>
           <h1 className="text-xl font-semibold tracking-tight">{isIssue ? "Issues" : "Test cases"}</h1>
           <p className="mt-0.5 text-sm text-muted">
-            {isIssue
-              ? "Bugs QA logged in the issue tabs, with their reference screenshots and videos."
-              : "Every test case run by QA. Filter QA status to Fail to see the bugs."}
+            {workbook.sourceType === "captures"
+              ? "Bugs reported with the browser extension, with their screenshots, recordings and API logs."
+              : isIssue
+                ? "Bugs QA logged in the issue tabs, with their reference screenshots and videos."
+                : "Every test case run by QA. Filter QA status to Fail to see the bugs."}
           </p>
         </div>
         <nav className="inline-flex rounded-lg border border-line bg-surface p-0.5 text-sm" aria-label="Record type">
@@ -125,7 +127,20 @@ async function BugList({ searchParams }: { searchParams: PageProps<"/">["searchP
 
       {visible.length === 0 ? (
         <div className="rounded-xl border border-dashed border-line bg-surface px-6 py-16 text-center text-sm text-muted">
-          Nothing matches these filters.
+          {workbook.sourceType === "captures" && data.records.length === 0 ? (
+            <>
+              <p className="font-medium text-foreground">No bugs reported yet</p>
+              <p className="mt-1">Bugs reported with the UpTrack browser extension show up here.</p>
+              <Link
+                href="/extension"
+                className="mt-5 inline-block rounded-md bg-accent px-4 py-2 font-medium text-white hover:bg-neutral-800"
+              >
+                Get the extension
+              </Link>
+            </>
+          ) : (
+            "Nothing matches these filters."
+          )}
         </div>
       ) : (
         <div className="overflow-hidden rounded-xl border border-line bg-surface">

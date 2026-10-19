@@ -176,6 +176,7 @@ export async function saveColumns(_prev: SaveState, form: FormData): Promise<Sav
   const workbooks = await listWorkbooks();
   const workbook = workbooks.find((w) => w.id === payload.id);
   if (!workbook) return { error: "That workbook no longer exists." };
+  if (workbook.source.type === "captures") return { error: "Reported bugs have no columns to map." };
 
   try {
     const file = await loadWorkbookFile(workbook.source);

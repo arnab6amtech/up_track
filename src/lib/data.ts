@@ -1,5 +1,7 @@
 import "server-only";
 import { cacheLife, cacheTag } from "next/cache";
+import { CAPTURES_TAB_SLUG, CAPTURES_WORKBOOK_NAME } from "./capture-types";
+import { captureToRecord, listCaptures } from "./captures";
 import { parseWorkbook } from "./parse";
 import { loadWorkbookFile } from "./source";
 import type { SheetData, SheetError } from "./types";
@@ -11,7 +13,7 @@ export const workbookTag = (id: string) => `workbook-${id}`;
 export interface WorkbookSummary {
   id: string;
   name: string;
-  sourceType: "drive" | "upload" | "local";
+  sourceType: "drive" | "upload" | "local" | "captures";
   builtIn: boolean;
   createdAt: string | null;
   sheetUrl: string | null;
@@ -50,6 +52,19 @@ export async function getSheetData(id: string): Promise<SheetData | SheetError> 
   try {
     const workbook = (await listWorkbooks()).find((w) => w.id === id);
     if (!workbook) throw new Error("This workbook no longer exists. It may have been removed.");
+    if (workbook.source.type === "captures") {
+      const captures = await listCaptures();
+      return {
+        ok: true,
+        title: CAPTURES_WORKBOOK_NAME,
+        modifiedTime: captures.at(-1)?.createdAt ?? null,
+        source: "Browser extension",
+        fetchedAt,
+        tabs: [{ name: CAPTURES_WORKBOOK_NAME, slug: CAPTURES_TAB_SLUG, kind: "issue", count: captures.length }],
+        records: captures.map(captureToRecord),
+        doneValues: null,
+      };
+    }
     const [file, mapping] = await Promise.all([loadWorkbookFile(workbook.source), getMapping(workbook.id)]);
     const { tabs, records } = parseWorkbook(file.bytes, mapping);
     return {

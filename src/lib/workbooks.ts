@@ -2,6 +2,7 @@ import "server-only";
 import { randomBytes } from "node:crypto";
 import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { CAPTURES_WORKBOOK_ID, CAPTURES_WORKBOOK_NAME } from "./capture-types";
 import type { WorkbookMapping } from "./mapping";
 import { slugify } from "./parse";
 
@@ -10,7 +11,9 @@ export type WorkbookSource =
   /** Uploaded through the Import page; `file` is a name inside the workbooks directory. */
   | { type: "upload"; file: string; originalName: string }
   /** Development copy configured with SHEET_FILE_PATH. */
-  | { type: "local"; path: string };
+  | { type: "local"; path: string }
+  /** Bugs reported with the browser extension, stored by UpTrack itself. */
+  | { type: "captures" };
 
 export interface Workbook {
   id: string;
@@ -67,11 +70,18 @@ async function writeIndex(workbooks: Workbook[]) {
   await writeJson(indexPath(), workbooks);
 }
 
-/** Built-in workbook first (if configured), then imports, newest first. */
+/** Built-in sheet first (if configured), then imports newest first, then the extension's reported bugs. */
 export async function listWorkbooks(): Promise<Workbook[]> {
   const builtIn = builtInWorkbook();
   const imported = (await readIndex()).sort((a, b) => (b.createdAt ?? "").localeCompare(a.createdAt ?? ""));
-  return builtIn ? [builtIn, ...imported] : imported;
+  const reported: Workbook = {
+    id: CAPTURES_WORKBOOK_ID,
+    name: CAPTURES_WORKBOOK_NAME,
+    source: { type: "captures" },
+    createdAt: null,
+    builtIn: true,
+  };
+  return [...(builtIn ? [builtIn] : []), ...imported, reported];
 }
 
 export function newWorkbookId(name: string): string {

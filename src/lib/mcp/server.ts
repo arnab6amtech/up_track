@@ -1,6 +1,9 @@
 import "server-only";
+import { readFile } from "node:fs/promises";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import { describeUserAgent, isFailed, type NetworkEntry } from "../capture-types";
+import { captureFilePath, getCapture, readCaptureLog } from "../captures";
 import { getSheetData, getWorkbooks, pickWorkbook, type WorkbookSummary } from "../data";
 import { makeIsOpen } from "../open";
 import { downloadDriveImage } from "../source";
@@ -10,6 +13,7 @@ const INSTRUCTIONS = `UpTrack holds the QA team's bug reports for this product, 
 - "Issues" are bugs QA logged directly; "test cases" are QA's planned checks, and a failed test case is also a bug.
 - Use search_bugs to find work (open_only=true for bugs that still need a developer), get_bug for the full report, and get_bug_reference to see QA's screenshots before changing UI code.
 - Record IDs look like "bugs-17" (sheet tab name + row number) and belong to one workbook; pass the same workbook you found them in.
+- Bugs in the "reported" workbook were captured with the UpTrack browser extension. get_bug shows their page, browser and failed API calls; get_bug_logs has the full request/response details and console errors, which often point straight at the cause.
 - This server is read-only: tell the user what to write in the sheet's Dev Status / Dev Remarks rather than claiming you updated it.`;
 
 const MAX_IMAGE_BYTES = 4_500_000;
@@ -119,7 +123,7 @@ export function createMcpServer({ baseUrl, caller }: { baseUrl: string; caller: 
         if (!contains(r.developer, args.developer)) return false;
         if (!contains(r.severity, args.severity) || !contains(r.priority, args.priority)) return false;
         if (terms.length) {
-          const hay = [r.title, r.module, r.feature, r.actual, r.devRemarks, r.qaRemarks, r.testCaseId, r.sl, r.tab]
+          const hay = [r.title, r.description ?? "", r.module, r.feature, r.actual, r.devRemarks, r.qaRemarks, r.testCaseId, r.sl, r.tab]
             .join(" ")
             .toLowerCase();
           if (!terms.every((t) => hay.includes(t))) return false;
@@ -174,7 +178,46 @@ export function createMcpServer({ baseUrl, caller }: { baseUrl: string; caller: 
       const { workbook, data } = loaded;
       const r = data.records.find((rec) => rec.id === id);
       if (!r) return fail(`No record "${id}" in workbook "${workbook.id}". Use search_bugs to find IDs.`);
-      return text(formatBug(r, workbook, pageUrl(workbook, r), makeIsOpen(data.doneValues)(r)));
+      const report = formatBug(r, workbook, pageUrl(workbook, r), makeIsOpen(data.doneValues)(r), baseUrl);
+      return text(r.capture ? `${report}\n\n${await captureSummary(r.capture.id, baseUrl)}` : report);
+    },
+  );
+
+  server.registerTool(
+    "get_bug_logs",
+    {
+      title: "Get bug API log",
+      description:
+        "For bugs reported with the browser extension: the API calls the page made (method, URL, status, timing, headers, request and response bodies) and its console errors. Secrets in headers and bodies were hidden before upload.",
+      inputSchema: {
+        id: z.string().describe('Record ID of a reported bug, e.g. "reported-3".'),
+        workbook: workbookArg,
+        failed_only: z.boolean().optional().describe("Only calls that failed (network error or HTTP 4xx/5xx)."),
+        url_contains: z.string().optional().describe("Only calls whose URL contains this text."),
+        include_bodies: z.boolean().optional().describe("Include request/response bodies. Default true."),
+        limit: z.number().int().min(1).max(200).optional().describe("Default 50."),
+      },
+      annotations: READ_ONLY,
+    },
+    async ({ id, workbook: wb, failed_only, url_contains, include_bodies = true, limit = 50 }) => {
+      log("get_bug_logs", { id, workbook: wb, failed_only, url_contains });
+      const loaded = await loadWorkbook(wb);
+      if ("error" in loaded) return fail(loaded.error);
+      const r = loaded.data.records.find((rec) => rec.id === id);
+      if (!r) return fail(`No record "${id}" in workbook "${loaded.workbook.id}".`);
+      if (!r.capture) return fail(`${id} wasn't reported with the browser extension, so it has no API log.`);
+
+      const { network, console: consoleEntries } = await readCaptureLog(r.capture.id);
+      const needle = url_contains?.toLowerCase();
+      const calls = network.filter((e) => (!failed_only || isFailed(e)) && (!needle || e.url.toLowerCase().includes(needle)));
+      return json({
+        total_calls: network.length,
+        matching_calls: calls.length,
+        calls: calls.slice(0, limit).map((e) =>
+          include_bodies ? e : { ...e, requestBody: undefined, responseBody: undefined },
+        ),
+        console: consoleEntries.slice(0, limit),
+      });
     },
   );
 
@@ -208,7 +251,7 @@ export function createMcpServer({ baseUrl, caller }: { baseUrl: string; caller: 
       const picked = index ? [{ m: r.media[index - 1], n: index }] : r.media.slice(0, 5).map((m, i) => ({ m, n: i + 1 }));
       const content: ToolResult["content"] = [];
       for (const { m, n } of picked) {
-        content.push(...(await referenceContent(m, n)));
+        content.push(...(await referenceContent(m, n, baseUrl)));
       }
       if (!index && r.media.length > 5) {
         content.push({ type: "text", text: `${r.media.length - 5} more reference(s); pass index to see them.` });
@@ -304,7 +347,10 @@ Using the UpTrack tools:
   return server;
 }
 
-function formatBug(r: BugRecord, workbook: WorkbookSummary, url: string, open: boolean): string {
+/** Links to UpTrack's own files are relative in records; agents need full URLs. */
+const absolute = (url: string, baseUrl: string) => (url.startsWith("/") ? `${baseUrl}${url}` : url);
+
+function formatBug(r: BugRecord, workbook: WorkbookSummary, url: string, open: boolean, baseUrl: string): string {
   const lines = [`# ${r.title}`, ""];
   const meta: [string, string][] = [
     ["ID", r.id],
@@ -321,11 +367,13 @@ function formatBug(r: BugRecord, workbook: WorkbookSummary, url: string, open: b
     ["Developer", r.developer],
     ["Task ID", r.taskId],
     ["Bug ID", r.bugId],
+    ["Reported by", r.capture?.reporter ?? ""],
     ["UpTrack page", url],
   ];
   for (const [k, v] of meta) if (v) lines.push(`- **${k}:** ${v}`);
 
   const sections: [string, string][] = [
+    ["Description", r.description ?? ""],
     ["Test data", r.testData],
     ["Steps", r.steps],
     ["Expected result", r.expected],
@@ -337,7 +385,9 @@ function formatBug(r: BugRecord, workbook: WorkbookSummary, url: string, open: b
 
   if (r.media.length) {
     lines.push("", "## References", "Call get_bug_reference to view them.");
-    r.media.forEach((m, i) => lines.push(`${i + 1}. ${describeKind(m)}${m.label ? ` "${m.label}"` : ""}: ${m.url}`));
+    r.media.forEach((m, i) =>
+      lines.push(`${i + 1}. ${describeKind(m)}${m.label ? ` "${m.label}"` : ""}: ${absolute(m.url, baseUrl)}`),
+    );
   }
   return lines.join("\n");
 }
@@ -361,9 +411,60 @@ async function fetchImage(url: string): Promise<{ data: string; mimeType: string
   }
 }
 
-async function referenceContent(m: MediaLink, n: number): Promise<ToolResult["content"]> {
-  const head = `Reference ${n}${m.label ? ` "${m.label}"` : ""} (${m.url})`;
+const describeCall = (e: NetworkEntry) =>
+  `${e.method} ${e.url} → ${e.status || `failed${e.error ? ` (${e.error})` : ""}`} in ${Math.round(e.durationMs)} ms`;
+
+const clip = (text: string, max: number) => (text.length > max ? `${text.slice(0, max)}…` : text);
+
+/** Page, browser and the most telling log lines of a bug reported with the extension. */
+async function captureSummary(captureId: string, baseUrl: string): Promise<string> {
+  const [c, log] = await Promise.all([getCapture(captureId), readCaptureLog(captureId)]);
+  if (!c) return "";
+  const lines = [
+    "## Environment",
+    `- **Page:** ${c.page.url}`,
+    `- **Browser:** ${describeUserAgent(c.page.userAgent)}, window ${c.page.viewport.width}×${c.page.viewport.height} at ${c.page.devicePixelRatio}x`,
+    `- **Share link:** ${baseUrl}/c/${c.id}`,
+  ];
+  const failed = log.network.filter(isFailed);
+  lines.push("", `## Failed API calls (${failed.length} of ${log.network.length})`);
+  if (failed.length === 0) lines.push("None.");
+  for (const e of failed.slice(0, 10)) {
+    lines.push(`- ${describeCall(e)}`);
+    if (e.responseBody) lines.push(`  Response: ${clip(e.responseBody.replace(/\s+/g, " "), 400)}`);
+  }
+  if (failed.length > 10) lines.push(`- …and ${failed.length - 10} more`);
+  const errors = log.console.filter((x) => x.level === "error");
+  if (errors.length) {
+    lines.push("", `## Console errors (${errors.length})`);
+    for (const x of errors.slice(0, 10)) lines.push(`- ${clip(x.message.replace(/\s+/g, " "), 300)}`);
+  }
+  lines.push("", "Call get_bug_logs for every call with headers and bodies.");
+  return lines.join("\n");
+}
+
+const LOCAL_FILE = /^\/c\/([A-Za-z0-9]{16})\/files\/([a-z0-9._-]+)$/;
+
+/** A screenshot stored by UpTrack itself, read from disk instead of over HTTP. */
+async function localImage(url: string): Promise<{ data: string; mimeType: string } | null> {
+  const match = url.match(LOCAL_FILE);
+  const file = match && captureFilePath(match[1], match[2]);
+  if (!file) return null;
+  const mimeType = file.endsWith(".png") ? "image/png" : file.endsWith(".jpg") ? "image/jpeg" : null;
+  if (!mimeType) return null;
+  const bytes = await readFile(file).catch(() => null);
+  if (!bytes || bytes.byteLength > MAX_IMAGE_BYTES) return null;
+  return { data: bytes.toString("base64"), mimeType };
+}
+
+async function referenceContent(m: MediaLink, n: number, baseUrl: string): Promise<ToolResult["content"]> {
+  const head = `Reference ${n}${m.label ? ` "${m.label}"` : ""} (${absolute(m.url, baseUrl)})`;
   let image: { data: string; mimeType: string } | null = null;
+
+  if (m.kind === "image" && LOCAL_FILE.test(m.url)) {
+    image = await localImage(m.url);
+    if (image) return [{ type: "text", text: `${head}:` }, { type: "image", ...image }];
+  }
 
   if (m.kind === "drive" && m.thumb) {
     image = await fetchImage(m.thumb.replace(/sz=w\d+/, "sz=w1600"));

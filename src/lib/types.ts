@@ -53,6 +53,17 @@ export interface BugRecord {
   devCheck: string;
 
   media: MediaLink[];
+
+  /** Free-text description, for bugs reported with the browser extension. */
+  description?: string;
+  /** Set for bugs reported with the browser extension. */
+  capture?: {
+    id: string;
+    reporter: string;
+    createdAt: string;
+    pageUrl: string;
+    counts: { requests: number; failedRequests: number; consoleErrors: number };
+  };
 }
 
 export interface TabInfo {

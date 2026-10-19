@@ -28,7 +28,8 @@ async function copyText(text: string): Promise<boolean> {
   }
 }
 
-function useCopy(text: string) {
+/** Copies `text` on demand and reports "copied" / "failed" for a moment. */
+export function useCopy(text: string) {
   const [state, setState] = useState<"idle" | "copied" | "failed">("idle");
   const copy = async () => {
     setState((await copyText(text)) ? "copied" : "failed");

@@ -7,6 +7,13 @@ export function migrationsDir(): string {
   return path.resolve(/*turbopackIgnore: true*/ process.cwd(), "db/migrations");
 }
 
+/** Migration file names in the order they apply. */
+export function migrationFiles(): string[] {
+  return readdirSync(migrationsDir())
+    .filter((f) => /^\d{4}_[\w-]+\.sql$/.test(f))
+    .sort();
+}
+
 /**
  * Applies pending migrations in one transaction, so a failure leaves the database untouched. On a
  * PostgreSQL server a transaction-scoped advisory lock stops several app servers migrating at once.
@@ -20,10 +27,7 @@ export async function migrate(db: Database): Promise<string[]> {
   return db.transaction(async (tx) => {
     if (db.kind === "postgres") await tx.query("select pg_advisory_xact_lock(727274)");
     const applied = new Set((await tx.query<{ version: string }>("select version from schema_migrations")).map((r) => r.version));
-    const pending = readdirSync(migrationsDir())
-      .filter((f) => /^\d{4}_[\w-]+\.sql$/.test(f))
-      .sort()
-      .filter((f) => !applied.has(f));
+    const pending = migrationFiles().filter((f) => !applied.has(f));
 
     for (const file of pending) {
       await tx.exec(readFileSync(path.join(migrationsDir(), file), "utf8"));

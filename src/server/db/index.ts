@@ -1,7 +1,7 @@
 import "server-only";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { migrate } from "./migrate";
+import { migrate, migrationFiles } from "./migrate";
 
 export type Row = Record<string, unknown>;
 
@@ -125,7 +125,12 @@ async function openPglite(): Promise<Database> {
 
 // ---- Shared instance ----
 
-const shared = globalThis as typeof globalThis & { __uptrackDb?: Promise<Database> };
+const shared = globalThis as typeof globalThis & {
+  __uptrackDb?: Promise<Database>;
+  /** The migration files the open database was last migrated with. */
+  __uptrackMigrated?: string;
+  __uptrackMigrating?: Promise<void>;
+};
 
 /**
  * Database reads are request-time work: tell Next.js not to try prerendering past this point (the
@@ -146,7 +151,27 @@ async function atRequestTime() {
  */
 export async function getDb(): Promise<Database> {
   await atRequestTime();
-  return openShared();
+  const db = await openShared();
+  if (process.env.NODE_ENV !== "production") await migrateIfChanged(db);
+  return db;
+}
+
+/**
+ * In development the database stays open across code reloads, so a migration added while the dev server
+ * runs would otherwise wait for a restart. Apply it as soon as its file appears. (Production servers
+ * migrate when they start, which every deploy does.)
+ */
+async function migrateIfChanged(db: Database) {
+  const files = migrationFiles().join(",");
+  if (shared.__uptrackMigrated === files) return;
+  shared.__uptrackMigrating ??= migrate(db)
+    .then(() => {
+      shared.__uptrackMigrated = files;
+    })
+    .finally(() => {
+      shared.__uptrackMigrating = undefined;
+    });
+  await shared.__uptrackMigrating;
 }
 
 function openShared(): Promise<Database> {
@@ -154,6 +179,7 @@ function openShared(): Promise<Database> {
     const url = process.env.DATABASE_URL?.trim();
     const db = url ? await openPostgres(url) : await openPglite();
     await migrate(db);
+    shared.__uptrackMigrated = migrationFiles().join(",");
     return db;
   })().catch((err) => {
     shared.__uptrackDb = undefined;

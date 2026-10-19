@@ -1,16 +1,20 @@
+import Link from "next/link";
 import { Suspense } from "react";
 import { CopyBlock } from "@/components/copy-block";
-import { mcpEnabled } from "@/lib/mcp/auth";
 import { publicOrigin } from "@/lib/origin";
+import { listMyOrganizations } from "@/server/access";
+import { requireUser } from "@/server/auth/session";
 
 export const metadata = { title: "Connect your agent — UpTrack" };
 
 const TOOLS: [string, string][] = [
-  ["search_bugs", "Find issues and test cases by tab, module, status, developer or text; open_only for work that's left."],
-  ["get_bug", "The full report: steps, expected and actual result, remarks, statuses."],
-  ["get_bug_reference", "QA's screenshots as images the agent can look at."],
-  ["get_summary", "Open bugs by tab, module and developer."],
-  ["list_workbooks", "The workbooks imported into UpTrack."],
+  ["list_projects", "Projects you can see, with open bug counts and active versions."],
+  ["search_bugs", "Find bugs by project, version, module, status, assignee, severity or text; open_only for work that's left."],
+  ["get_bug", "The full report: steps, expected and actual result, versions, people, failed API calls and comments."],
+  ["get_bug_reference", "The bug's screenshots as images the agent can look at."],
+  ["get_bug_logs", "Full API requests, responses and console errors for bugs reported with the extension."],
+  ["get_summary", "Open bugs by project, severity, assignee and module."],
+  ["list_workbooks", "Older QA spreadsheets; pass workbook=… to the tools above to read them."],
 ];
 
 export default function ConnectPage() {
@@ -31,6 +35,9 @@ export default function ConnectPage() {
 }
 
 async function Setup() {
+  const user = await requireUser("/connect");
+  const orgs = await listMyOrganizations(user.id);
+  const tokensHref = orgs[0] ? `/o/${orgs[0].slug}/settings/tokens` : "/onboarding";
   const origin = await publicOrigin();
   const url = `${origin}/api/mcp`;
 
@@ -47,17 +54,14 @@ async function Setup() {
 
   return (
     <>
-      {!mcpEnabled() && (
-        <p className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2.5 text-sm text-amber-900">
-          The MCP endpoint is turned off on this server. An admin needs to set <code className="font-mono">MCP_TOKENS</code>{" "}
-          before agents can connect.
-        </p>
-      )}
 
       <Step n={1} title="Get a token">
         <p>
-          Ask whoever runs UpTrack for your personal token, then add it to your shell profile (for example{" "}
-          <code className="font-mono">~/.zshrc</code>):
+          Create a personal token on your{" "}
+          <Link href={tokensHref} className="font-medium underline underline-offset-2">
+            API tokens
+          </Link>{" "}
+          page, then add it to your shell profile (for example <code className="font-mono">~/.zshrc</code>):
         </p>
         <CopyBlock label="shell" code={`export UPTRACK_TOKEN=paste-your-token-here`} />
       </Step>
@@ -99,7 +103,7 @@ async function Setup() {
           label="examples"
           code={[
             "What's still open? Group it by module.",
-            "Fix bugs-17. Look at QA's screenshot first.",
+            "Fix UPT-12. Look at the screenshot first.",
             "Is the login timeout bug already fixed in this repo?",
           ].join("\n")}
         />

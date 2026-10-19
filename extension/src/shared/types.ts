@@ -1,7 +1,7 @@
 import type { CaptureLog, PageInfo } from "../../../src/lib/capture-types";
 
-export type { CaptureLog, ConsoleEntry, NetworkEntry, PageInfo } from "../../../src/lib/capture-types";
-export { isFailed, SEVERITIES } from "../../../src/lib/capture-types";
+export type { CaptureLog, ConsoleEntry, NetworkEntry, PageInfo, ReportableProject } from "../../../src/lib/capture-types";
+export { describeUserAgent, isFailed, PRIORITIES, SEVERITIES } from "../../../src/lib/capture-types";
 
 /** A screenshot or recording waiting in the editor to be annotated and reported. */
 export interface Draft {

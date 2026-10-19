@@ -28,11 +28,18 @@ function stop() {
   if (recorder?.state === "recording") recorder.stop();
 }
 
+/**
+ * Size limits only. Chrome picks a fixed frame size when min and max match (or share a shape) and puts the
+ * page in black bars when the shapes differ; with limits of different shapes it sizes each frame to the
+ * captured page itself, scaled down to fit.
+ */
+const FRAME_LIMITS = { minWidth: 160, minHeight: 90, maxWidth: 1920, maxHeight: 1920 };
+
 async function start(streamId: string, maxMs: number) {
   stream = await navigator.mediaDevices.getUserMedia({
     audio: false,
     // Chrome's tab-capture constraints aren't in the standard typings.
-    video: { mandatory: { chromeMediaSource: "tab", chromeMediaSourceId: streamId, maxFrameRate: 30 } } as MediaTrackConstraints,
+    video: { mandatory: { chromeMediaSource: "tab", chromeMediaSourceId: streamId, maxFrameRate: 30, ...FRAME_LIMITS } } as MediaTrackConstraints,
   });
   const mimeType = ["video/webm;codecs=vp9", "video/webm;codecs=vp8", "video/webm"].find((t) => MediaRecorder.isTypeSupported(t));
   recorder = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 2_500_000 });

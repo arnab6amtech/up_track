@@ -1,0 +1,130 @@
+"use client";
+
+import { useActionState, useState } from "react";
+import { reportBugAction } from "@/server/actions/project";
+import type { ActionState } from "@/server/actions/result";
+import { PRIORITY_LABEL, SEVERITY_LABEL, VERSION_STATUS_LABEL } from "@/lib/labels";
+import { Field, FormMessage, inputClass, selectClass, SubmitButton } from "./form";
+
+interface Option {
+  id: string;
+  name: string;
+}
+
+export function ReportBugForm({
+  org,
+  project,
+  versions,
+  defaultVersionId,
+  components,
+  members,
+}: {
+  org: string;
+  project: string;
+  versions: (Option & { status: string })[];
+  defaultVersionId: string;
+  components: Option[];
+  /** Empty when the reporter can't assign bugs. */
+  members: Option[];
+}) {
+  const [state, action] = useActionState<ActionState, FormData>(reportBugAction, {});
+  const [files, setFiles] = useState<File[]>([]);
+  const tooBig = files.reduce((n, f) => n + f.size, 0) > 28 * 1024 * 1024;
+
+  return (
+    <form action={action} className="space-y-5">
+      <input type="hidden" name="org" value={org} />
+      <input type="hidden" name="project" value={project} />
+
+      <Field label="Title" htmlFor="title">
+        <input id="title" name="title" required maxLength={300} autoFocus placeholder="What went wrong?" className={inputClass} />
+      </Field>
+
+      <div className="grid gap-4 sm:grid-cols-2">
+        <Field label="Found in version" htmlFor="versionId">
+          <select id="versionId" name="versionId" required defaultValue={defaultVersionId} className={selectClass}>
+            {versions.map((v) => (
+              <option key={v.id} value={v.id}>
+                {v.name} ({VERSION_STATUS_LABEL[v.status] ?? v.status})
+              </option>
+            ))}
+          </select>
+        </Field>
+        <Field label="Module" htmlFor="componentId">
+          <select id="componentId" name="componentId" defaultValue="" className={selectClass}>
+            <option value="">None</option>
+            {components.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name}
+              </option>
+            ))}
+          </select>
+        </Field>
+        <Field label="Severity" htmlFor="severity" hint="How bad the impact is.">
+          <select id="severity" name="severity" defaultValue="medium" className={selectClass}>
+            {Object.entries(SEVERITY_LABEL).map(([v, l]) => (
+              <option key={v} value={v}>
+                {l}
+              </option>
+            ))}
+          </select>
+        </Field>
+        <Field label="Priority" htmlFor="priority" hint="How soon it should be fixed.">
+          <select id="priority" name="priority" defaultValue="medium" className={selectClass}>
+            {Object.entries(PRIORITY_LABEL).map(([v, l]) => (
+              <option key={v} value={v}>
+                {l}
+              </option>
+            ))}
+          </select>
+        </Field>
+        {members.length > 0 && (
+          <Field label="Assignee" htmlFor="assigneeId">
+            <select id="assigneeId" name="assigneeId" defaultValue="" className={selectClass}>
+              <option value="">Nobody yet</option>
+              {members.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.name}
+                </option>
+              ))}
+            </select>
+          </Field>
+        )}
+      </div>
+
+      <Field label="Description" htmlFor="description">
+        <textarea id="description" name="description" rows={3} className={inputClass} />
+      </Field>
+      <Field label="Steps to reproduce" htmlFor="steps">
+        <textarea id="steps" name="steps" rows={4} placeholder={"1. Open checkout\n2. Apply coupon SAVE10"} className={inputClass} />
+      </Field>
+      <div className="grid gap-4 sm:grid-cols-2">
+        <Field label="Expected result" htmlFor="expected">
+          <textarea id="expected" name="expected" rows={3} className={inputClass} />
+        </Field>
+        <Field label="Actual result" htmlFor="actual">
+          <textarea id="actual" name="actual" rows={3} className={inputClass} />
+        </Field>
+      </div>
+      <Field label="Environment" htmlFor="environment" hint="Device, browser, account or data used.">
+        <input id="environment" name="environment" maxLength={500} placeholder="Chrome 155 on macOS, staging" className={inputClass} />
+      </Field>
+
+      <Field label="Screenshots and recordings" htmlFor="attachments" hint="PNG, JPEG, GIF, WebP, WebM or MP4. Up to 10 files, 25 MB each.">
+        <input
+          id="attachments"
+          name="attachments"
+          type="file"
+          multiple
+          accept="image/png,image/jpeg,image/gif,image/webp,video/webm,video/mp4"
+          onChange={(e) => setFiles([...(e.target.files ?? [])])}
+          className="block w-full text-sm file:mr-3 file:rounded-md file:border file:border-line file:bg-surface file:px-3 file:py-1.5 file:text-xs file:font-medium"
+        />
+      </Field>
+      {tooBig && <FormMessage error="Together these files are over 28 MB. Remove some, or use the browser extension for long recordings." />}
+
+      <FormMessage error={state.error} />
+      <SubmitButton pendingText="Reporting…">Report bug</SubmitButton>
+    </form>
+  );
+}

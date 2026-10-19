@@ -1,6 +1,3 @@
-import Link from "next/link";
-import { CAPTURES_WORKBOOK_ID } from "@/lib/capture-types";
-import { mcpEnabled } from "@/lib/mcp/auth";
 
 export const metadata = { title: "Browser extension — UpTrack" };
 
@@ -11,20 +8,11 @@ export default function ExtensionPage() {
         <h1 className="text-xl font-semibold tracking-tight">Report bugs from your browser</h1>
         <p className="mt-1 text-sm text-muted">
           The UpTrack extension takes a screenshot or records the tab, lets you mark up the screenshot, and attaches
-          the page&apos;s API calls and console errors. Each report gets a share link and shows up in{" "}
-          <Link href={`/?wb=${CAPTURES_WORKBOOK_ID}`} className="font-medium text-foreground underline underline-offset-2">
-            Reported bugs
-          </Link>
-          , where your AI agent can read it too. Works in Chrome, Edge and Brave.
+          the page&apos;s API calls and console errors. You pick the project and version, and the bug lands in that
+          project with a share link, where your AI agent can read it too. Works in Chrome, Edge and Brave.
         </p>
       </div>
 
-      {!mcpEnabled() && (
-        <p className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2.5 text-sm text-amber-900">
-          Reporting is turned off on this server. An admin needs to set <code className="font-mono">MCP_TOKENS</code>{" "}
-          first; the extension uses the same personal tokens as the AI agent.
-        </p>
-      )}
 
       <Step n={1} title="Download">
         <a
@@ -52,10 +40,11 @@ export default function ExtensionPage() {
         </ol>
       </Step>
 
-      <Step n={3} title="Connect">
+      <Step n={3} title="Sign in">
         <p>
-          Click the UpTrack icon and paste your personal token: the same one you use for the AI agent. Ask whoever runs
-          UpTrack if you don&apos;t have one.
+          Nothing to set up: the extension already knows this server, and reports bugs as the account you&apos;re signed
+          in to UpTrack with in this browser. If you&apos;re signed out, its menu has a{" "}
+          <span className="font-medium">Sign in</span> button. You pick the project and version for each report.
         </p>
       </Step>
 
@@ -70,8 +59,8 @@ export default function ExtensionPage() {
             to the part that matters.
           </li>
           <li>
-            Add a title and press <span className="font-medium">Create bug</span>. You get a share link and a ready
-            command for your AI agent.
+            Pick the project and the version you were testing, add a title and press{" "}
+            <span className="font-medium">Create bug</span>. You get a share link and a ready command for your AI agent.
           </li>
         </ol>
       </Step>

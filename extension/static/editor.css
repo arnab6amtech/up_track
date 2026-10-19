@@ -1,49 +1,78 @@
+/*
+ * One screen, no page scroll: the capture, title and description on the left (the capture takes whatever
+ * height is left), the page's details in a panel on the right that scrolls on its own.
+ */
+html,
 body {
-  min-height: 100vh;
+  height: 100%;
+}
+
+body {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
   background: var(--surface-2);
 }
 
 .topbar {
-  position: sticky;
-  top: 0;
-  z-index: 5;
+  flex: none;
+  min-height: 49px;
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 10px 16px;
+  padding: 8px 12px 8px 16px;
   background: var(--bg);
   border-bottom: 1px solid var(--line);
 }
 
-.layout {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 360px;
-  gap: 16px;
-  padding: 16px;
-  align-items: start;
-}
-
-@media (max-width: 900px) {
-  .layout {
-    grid-template-columns: 1fr;
-  }
-}
-
-.stage {
-  display: grid;
+.topbar-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
   gap: 10px;
+}
+
+.layout {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) clamp(360px, 30vw, 480px);
+  gap: 12px;
+  padding: 12px;
+}
+
+.report,
+.devtools {
   min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+/* ---- Capture ---- */
+
+.media {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--line);
 }
 
 .toolbar {
+  flex: none;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 10px;
+  padding: 6px 8px;
   background: var(--bg);
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  padding: 6px;
+  border-bottom: 1px solid var(--line);
 }
 
 .group {
@@ -90,18 +119,29 @@ body {
   box-shadow: 0 0 0 2px var(--accent);
 }
 
+/* The screenshot or recording is sized in script to fit here whole. */
+.stage {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  display: grid;
+  place-items: center;
+  padding: 12px;
+  overflow: hidden;
+}
+
 .canvas-wrap {
   position: relative;
-  background: var(--bg);
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  overflow: hidden;
   line-height: 0;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--bg);
 }
 
 .canvas-wrap canvas {
-  width: 100%;
-  height: auto;
+  display: block;
+  max-width: 100%;
   cursor: crosshair;
   touch-action: none;
 }
@@ -123,80 +163,90 @@ body {
   outline: none;
 }
 
-.video-wrap {
-  display: grid;
-  gap: 10px;
-  background: var(--bg);
+.stage video {
+  display: block;
+  max-width: 100%;
   border: 1px solid var(--line);
-  border-radius: 10px;
-  padding: 10px;
-}
-
-.video-wrap video {
-  width: 100%;
-  max-height: 70vh;
-  background: #000;
   border-radius: 6px;
+  background: var(--bg);
 }
 
 .trim {
-  display: grid;
-  gap: 6px;
-}
-
-.trim-row {
+  flex: none;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 8px;
-}
-
-.panel {
-  position: sticky;
-  top: 62px;
+  padding: 8px 12px;
   background: var(--bg);
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  padding: 16px;
+  border-top: 1px solid var(--line);
 }
 
-.stack {
-  display: grid;
-  gap: 12px;
+.trim-hint {
+  margin-left: 4px;
 }
 
-.row {
+/* ---- Title, description and fields ---- */
+
+.report-form {
+  flex: none;
   display: grid;
-  grid-template-columns: 1fr 1fr;
   gap: 10px;
+  padding: 14px 18px 16px;
 }
 
-.log {
-  display: grid;
-  gap: 6px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  padding: 10px;
-  background: var(--surface-2);
-}
-
-.failed {
-  margin: 0;
+.title-input,
+.description-input {
+  width: 100%;
+  border: 0;
   padding: 0;
-  list-style: none;
+  outline: none;
+  background: none;
+}
+
+.title-input {
+  font-size: 20px;
+  font-weight: 600;
+}
+
+.description-input {
+  resize: none;
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.title-input::placeholder,
+.description-input::placeholder {
+  color: #a3a3a3;
+}
+
+.fields {
   display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 8px 10px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.fields .field {
   gap: 3px;
 }
 
-.failed li {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.fields label {
+  font-size: 11px;
+  color: var(--muted);
 }
 
-.status-fail {
-  color: var(--danger);
-  font-weight: 600;
+.fields .input {
+  padding: 6px 8px;
+  font-size: 13px;
+}
+
+.form-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 14px;
 }
 
 .check {
@@ -211,6 +261,7 @@ body {
 }
 
 .progress {
+  width: 140px;
   height: 6px;
   border-radius: 999px;
   background: var(--line);
@@ -225,11 +276,245 @@ body {
 }
 
 .done-title {
-  font-size: 16px;
+  font-size: 18px;
   font-weight: 600;
+}
+
+.done-links {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 10px;
 }
 
 .copy-row {
   display: flex;
   gap: 6px;
+}
+
+.notice-action {
+  display: flex;
+  width: fit-content;
+  margin-top: 8px;
+}
+
+/* ---- Captured from the page ---- */
+
+.tabs {
+  flex: none;
+  display: flex;
+  border-bottom: 1px solid var(--line);
+  padding: 0 8px;
+  overflow-x: auto;
+}
+
+.tab {
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: none;
+  padding: 11px 8px 9px;
+  margin-bottom: -1px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--muted);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.tab:hover {
+  color: var(--fg);
+}
+
+.tab[aria-selected="true"] {
+  color: var(--fg);
+  border-bottom-color: var(--accent);
+}
+
+.count {
+  color: var(--muted);
+  font-weight: 400;
+}
+
+.count .status-fail {
+  font-weight: 500;
+}
+
+.tab-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 12px 14px 16px;
+}
+
+.tab-tools {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.filter {
+  flex: 1;
+  padding: 6px 9px;
+  font-size: 12px;
+}
+
+.details {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 8px 14px;
+  margin: 0;
+  font-size: 12px;
+}
+
+.details dt {
+  color: var(--muted);
+}
+
+.details dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.details a {
+  color: inherit;
+}
+
+.entries {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 6px;
+}
+
+.entry {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font-size: 12px;
+}
+
+.net summary {
+  display: grid;
+  grid-template-columns: 34px 42px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 10px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.net summary::-webkit-details-marker {
+  display: none;
+}
+
+.net[open] summary {
+  border-bottom: 1px solid var(--line);
+}
+
+.net .path {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.entry-body {
+  display: grid;
+  gap: 8px;
+  padding: 8px 10px 10px;
+}
+
+.entry-body p {
+  margin: 0 0 3px;
+  font-weight: 600;
+}
+
+.entry pre {
+  margin: 0;
+  max-height: 180px;
+  overflow: auto;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: var(--surface-2);
+  font-size: 11px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.status-fail {
+  color: var(--danger);
+  font-weight: 600;
+}
+
+.status-ok {
+  color: var(--ok);
+  font-weight: 600;
+}
+
+.console-entry {
+  display: grid;
+  gap: 4px;
+  padding: 8px 10px;
+}
+
+.console-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.level {
+  border-radius: 4px;
+  padding: 1px 6px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.level-error {
+  background: #fef2f2;
+  color: var(--danger);
+}
+
+.level-warn {
+  background: #fffbeb;
+  color: #92400e;
+}
+
+.console-entry .message {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-line-clamp: 6;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.console-entry details summary {
+  cursor: pointer;
+  color: var(--muted);
+}
+
+.empty {
+  margin: 4px 0 0;
+}
+
+/* Narrow windows: stack the two halves and let the page scroll. */
+@media (max-width: 900px) {
+  body {
+    height: auto;
+    overflow: auto;
+  }
+
+  .layout {
+    grid-template-columns: 1fr;
+  }
+
+  .media {
+    height: 60vh;
+    flex: none;
+  }
+
+  .devtools {
+    max-height: 80vh;
+  }
 }

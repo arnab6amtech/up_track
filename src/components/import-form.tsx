@@ -1,7 +1,7 @@
 "use client";
 
 import { useActionState, useRef, useState } from "react";
-import { analyzeImport, type AnalyzeState } from "@/app/actions";
+import { analyzeImport, type AnalyzeState } from "@/app/sheets/actions";
 import { MappingEditor } from "./mapping-editor";
 
 type Mode = "upload" | "drive";

@@ -1,10 +1,10 @@
 // Editor tab: annotate the screenshot (or trim the recording), describe the bug and upload it to UpTrack.
 
 import { Annotator, type Tool } from "./annotate";
-import { ApiError, upload } from "./shared/api";
+import { ApiError, fetchProjects, SignInRequired, upload } from "./shared/api";
 import { deleteDraft, getDraft } from "./shared/drafts";
-import { getSettings } from "./shared/settings";
-import { isFailed, SEVERITIES, type CaptureLog, type Draft } from "./shared/types";
+import { getSettings, signInUrl } from "./shared/settings";
+import { describeUserAgent, isFailed, PRIORITIES, SEVERITIES, type CaptureLog, type Draft, type PageInfo, type ReportableProject } from "./shared/types";
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const COLORS = ["#e11d48", "#f97316", "#facc15", "#16a34a", "#2563eb", "#0a0a0a"];
@@ -27,12 +27,111 @@ function formatTime(ms: number) {
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 }
 
-function fillSelect(id: string, options: readonly string[], selected: string) {
+const capitalize = (value: string) => value[0].toUpperCase() + value.slice(1);
+
+function fillSelect(id: string, options: { value: string; label: string }[], selected: string) {
   const select = $<HTMLSelectElement>(id);
-  for (const value of ["", ...options]) {
-    const option = new Option(value || "Not set", value, false, value === selected);
-    select.add(option);
+  select.replaceChildren(...options.map((o) => new Option(o.label, o.value, false, o.value === selected)));
+}
+
+// ---- Project and version pickers ----
+
+let projects: ReportableProject[] = [];
+const LAST_CHOICE = "lastReportTarget";
+
+function showVersions(projectId: string, preferredVersionId?: string) {
+  const project = projects.find((p) => p.id === projectId);
+  const versions = project?.versions ?? [];
+  // Default to what the reporter used last, else whatever QA is testing now.
+  const pick = versions.find((v) => v.id === preferredVersionId) ?? versions.find((v) => v.status === "in_testing") ?? versions[0];
+  fillSelect(
+    "version",
+    versions.map((v) => ({ value: v.id, label: `${v.name}${v.status === "in_testing" ? " (in testing)" : ""}` })),
+    pick?.id ?? "",
+  );
+  const modules = project?.components ?? [];
+  $("module-field").hidden = modules.length === 0;
+  fillSelect("module", [{ value: "", label: "None" }, ...modules.map((c) => ({ value: c.id, label: c.name }))], "");
+}
+
+/** Projects in a picker, grouped by organization when the reporter belongs to several. */
+function fillProjects(selected: string) {
+  const select = $<HTMLSelectElement>("project");
+  const option = (p: ReportableProject) => new Option(`${p.name} (${p.key})`, p.id, false, p.id === selected);
+  const orgs = [...new Set(projects.map((p) => p.organization.name))];
+  if (orgs.length < 2) return select.replaceChildren(...projects.map(option));
+  select.replaceChildren(
+    ...orgs.map((name) => {
+      const group = document.createElement("optgroup");
+      group.label = name;
+      group.append(...projects.filter((p) => p.organization.name === name).map(option));
+      return group;
+    }),
+  );
+}
+
+const NO_SERVER = "Set up UpTrack first: open the extension's menu and enter your UpTrack address.";
+
+/** Explains why reporting can't continue; offers sign-in when that's the reason. */
+function blockProjects(message: string, signIn?: string) {
+  const notice = $("projects-error");
+  notice.replaceChildren(message);
+  if (signIn) {
+    const link = Object.assign(document.createElement("a"), { href: signIn, target: "_blank", textContent: "Sign in to UpTrack" });
+    link.className = "btn btn-primary btn-sm notice-action";
+    notice.append(link);
   }
+  notice.hidden = false;
+  $<HTMLButtonElement>("submit").disabled = true;
+}
+
+let projectsReady = false;
+
+async function loadProjects() {
+  const settings = await getSettings();
+  if (!settings) return blockProjects(NO_SERVER);
+  try {
+    projects = (await fetchProjects(settings)).filter((p) => p.versions.length > 0);
+  } catch (err) {
+    if (err instanceof SignInRequired) return blockProjects(err.message, signInUrl(settings));
+    return blockProjects(err instanceof ApiError ? err.message : "Couldn't load your projects.");
+  }
+  if (projects.length === 0) {
+    return blockProjects("You aren't on any project with an active version you can report to. Ask a project manager to add you.");
+  }
+  $("projects-error").hidden = true;
+  $<HTMLButtonElement>("submit").disabled = !$("load-error").hidden;
+  projectsReady = true;
+  const last = ((await chrome.storage.local.get(LAST_CHOICE))[LAST_CHOICE] ?? {}) as { projectId?: string; versionId?: string };
+  const projectId = projects.some((p) => p.id === last.projectId) ? last.projectId! : projects[0].id;
+  fillProjects(projectId);
+  showVersions(projectId, last.versionId);
+}
+
+$<HTMLSelectElement>("project").addEventListener("change", (e) => showVersions((e.target as HTMLSelectElement).value));
+// Coming back after signing in (or being added to a project) in another tab: try again.
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible" && !projectsReady) void loadProjects();
+});
+
+// ---- Fitting the capture on screen ----
+
+/** Keeps the screenshot or recording as large as the stage allows, whole and undistorted. */
+function fitToStage(media: HTMLElement, width: number, height: number) {
+  const stage = $("stage");
+  const fit = () => {
+    const style = getComputedStyle(stage);
+    const room = {
+      width: stage.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight),
+      height: stage.clientHeight - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom),
+    };
+    // 2px for the border.
+    const scale = Math.max(0, Math.min((room.width - 2) / width, (room.height - 2) / height));
+    media.style.width = `${Math.floor(width * scale)}px`;
+    media.style.height = `${Math.floor(height * scale)}px`;
+  };
+  new ResizeObserver(fit).observe(stage);
+  fit();
 }
 
 // ---- Screenshot annotation ----
@@ -43,6 +142,7 @@ async function setUpImage() {
   $("canvas-wrap").hidden = false;
   const a = new Annotator($<HTMLCanvasElement>("canvas"), bitmap, $<HTMLTextAreaElement>("text-input"));
   annotator = a;
+  fitToStage($("canvas"), bitmap.width, bitmap.height);
 
   const undo = $<HTMLButtonElement>("undo");
   const clear = $<HTMLButtonElement>("clear");
@@ -89,12 +189,14 @@ async function setUpImage() {
 // ---- Recording trim ----
 
 function setUpVideo() {
-  $("video-wrap").hidden = false;
   const video = $<HTMLVideoElement>("video");
+  video.hidden = false;
+  $("trim").hidden = false;
   video.src = URL.createObjectURL(draft.blob);
   const duration = () => (Number.isFinite(video.duration) ? video.duration * 1000 : (draft.durationMs ?? 0));
   const label = () => ($("trim-label").textContent = `${formatTime(trim.start)} to ${formatTime(trim.end)}`);
   video.addEventListener("loadedmetadata", () => {
+    if (video.videoWidth && video.videoHeight) fitToStage(video, video.videoWidth, video.videoHeight);
     trim = { start: 0, end: duration() };
     label();
   });
@@ -112,25 +214,162 @@ function setUpVideo() {
   });
 }
 
-// ---- Log summary ----
+// ---- What was captured from the page ----
 
-function showLog(log: CaptureLog) {
-  const failed = log.network.filter(isFailed);
+/** An element with text; page data is untrusted, so it's only ever set as text. */
+function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, text?: string): HTMLElementTagNameMap[K] {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (text !== undefined) node.textContent = text;
+  return node;
+}
+
+const clock = (ms: number) => new Date(ms).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+
+function showSummary(log: CaptureLog) {
+  const failed = log.network.filter(isFailed).length;
   const errors = log.console.filter((c) => c.level === "error").length;
   $("log-summary").textContent =
-    `${log.network.length} API ${log.network.length === 1 ? "call" : "calls"}, ${failed.length} failed · ` +
+    `${log.network.length} API ${log.network.length === 1 ? "call" : "calls"}, ${failed} failed · ` +
     `${errors} console ${errors === 1 ? "error" : "errors"} · page and browser details`;
-  const list = $("failed-list");
-  for (const e of failed.slice(-5)) {
-    const li = document.createElement("li");
-    const status = document.createElement("span");
-    status.className = "status-fail";
-    status.textContent = String(e.status || "ERR");
-    li.append(status, ` ${e.method} ${e.url.replace(/^https?:\/\/[^/]+/, "")}`);
-    li.title = e.url;
-    list.append(li);
-  }
   $("log-missing").hidden = draft.logAvailable;
+}
+
+function showPage(page: PageInfo | null) {
+  const list = $("page-details");
+  if (!page) {
+    list.replaceWith(el("p", "small muted", "The page's details weren't available (the tab closed before the recording finished)."));
+    return;
+  }
+  const rows: [string, string | HTMLElement][] = [];
+  if (/^https?:/.test(page.url)) {
+    const link = el("a", undefined, page.url);
+    link.href = page.url;
+    link.target = "_blank";
+    link.rel = "noreferrer";
+    rows.push(["Page", link]);
+  } else {
+    rows.push(["Page", page.url]);
+  }
+  if (page.title) rows.push(["Title", page.title]);
+  rows.push(["Browser", describeUserAgent(page.userAgent)]);
+  rows.push(["Window", `${page.viewport.width} × ${page.viewport.height} at ${page.devicePixelRatio}x`]);
+  if (page.screen) rows.push(["Screen", `${page.screen.width} × ${page.screen.height}`]);
+  rows.push(["Language", page.language]);
+  rows.push(["Time zone", page.timezone]);
+  for (const [label, value] of rows) {
+    const dd = el("dd");
+    dd.append(value);
+    list.append(el("dt", undefined, label), dd);
+  }
+}
+
+function codeBlock(title: string, text: string) {
+  const box = el("div");
+  box.append(el("p", undefined, title), el("pre", "mono", text));
+  return box;
+}
+
+const headerText = (headers: Record<string, string>) => Object.entries(headers).map(([k, v]) => `${k}: ${v}`).join("\n");
+
+function showNetwork(log: CaptureLog) {
+  const failed = log.network.filter(isFailed).length;
+  const count = $("count-network");
+  count.replaceChildren(String(log.network.length));
+  if (failed) count.append(" · ", el("span", "status-fail", `${failed} failed`));
+
+  const render = () => {
+    const failedOnly = $<HTMLInputElement>("failed-only").checked;
+    const query = $<HTMLInputElement>("network-filter").value.trim().toLowerCase();
+    const calls = log.network.filter((e) => (!failedOnly || isFailed(e)) && (!query || e.url.toLowerCase().includes(query)));
+    const list = $("network-list");
+    list.replaceChildren(
+      ...calls.map((e) => {
+        const item = el("li");
+        const details = el("details", "entry net");
+        const summary = el("summary");
+        let path = e.url;
+        try {
+          const u = new URL(e.url);
+          path = u.pathname + u.search;
+        } catch {}
+        summary.append(
+          el("span", `mono ${isFailed(e) ? "status-fail" : "status-ok"}`, String(e.status || "ERR")),
+          el("span", "mono", e.method),
+          Object.assign(el("span", "mono path", path), { title: e.url }),
+          el("span", "muted", `${Math.round(e.durationMs)} ms`),
+        );
+        const body = el("div", "entry-body");
+        body.append(codeBlock("URL", e.url));
+        if (e.error) body.append(codeBlock("Error", e.error));
+        if (e.requestHeaders && Object.keys(e.requestHeaders).length) body.append(codeBlock("Request headers", headerText(e.requestHeaders)));
+        if (e.requestBody) body.append(codeBlock("Request body", e.requestBody));
+        if (e.responseHeaders && Object.keys(e.responseHeaders).length) body.append(codeBlock("Response headers", headerText(e.responseHeaders)));
+        if (e.responseBody) body.append(codeBlock("Response body", e.responseBody));
+        details.append(summary, body);
+        item.append(details);
+        return item;
+      }),
+    );
+    const empty = $("network-empty");
+    empty.textContent = !draft.logAvailable
+      ? "No API calls were recorded: the page was open before the extension was installed. Reload it and reproduce the bug."
+      : query && log.network.length
+        ? "No calls match that filter."
+        : failedOnly && log.network.length
+          ? "No failed calls."
+        : "The page made no API calls.";
+    empty.hidden = calls.length > 0;
+  };
+  $("failed-only").addEventListener("change", render);
+  $("network-filter").addEventListener("input", render);
+  render();
+}
+
+function showConsole(log: CaptureLog) {
+  const errors = log.console.filter((c) => c.level === "error").length;
+  const count = $("count-console");
+  count.replaceChildren(String(log.console.length));
+  if (errors) count.append(" · ", el("span", "status-fail", `${errors} ${errors === 1 ? "error" : "errors"}`));
+  $("console-list").replaceChildren(
+    ...log.console.map((c) => {
+      const item = el("li", "entry console-entry");
+      const head = el("div", "console-head");
+      const source = c.source === "exception" ? "Uncaught exception" : c.source === "rejection" ? "Unhandled promise rejection" : `console.${c.level}`;
+      head.append(el("span", `level level-${c.level}`, c.level === "error" ? "Error" : "Warning"), el("span", "muted", `${source} · ${clock(c.at)}`));
+      item.append(head, el("p", "mono message", c.message));
+      if (c.stack) {
+        const stack = el("details");
+        stack.append(el("summary", "small", "Stack trace"), el("pre", "mono", c.stack));
+        item.append(stack);
+      }
+      return item;
+    }),
+  );
+  const empty = $("console-empty");
+  empty.textContent = draft.logAvailable ? "No console errors or warnings." : "Nothing was recorded: the page was open before the extension was installed.";
+  empty.hidden = log.console.length > 0;
+}
+
+function setUpTabs() {
+  const tabs = [...document.querySelectorAll<HTMLButtonElement>(".tab")];
+  for (const tab of tabs) {
+    tab.addEventListener("click", () => {
+      for (const t of tabs) {
+        const selected = t === tab;
+        t.setAttribute("aria-selected", String(selected));
+        $(`tab-${t.dataset.tab}`).hidden = !selected;
+      }
+    });
+  }
+}
+
+function showLog(log: CaptureLog) {
+  showSummary(log);
+  showPage(draft.page);
+  showNetwork(log);
+  showConsole(log);
+  setUpTabs();
 }
 
 // ---- Submit ----
@@ -141,7 +380,7 @@ $("form").addEventListener("submit", async (e) => {
   error.hidden = true;
   const settings = await getSettings();
   if (!settings) {
-    error.textContent = "Connect to UpTrack first: open the extension's menu and enter the address and your token.";
+    error.textContent = NO_SERVER;
     error.hidden = false;
     return;
   }
@@ -159,9 +398,11 @@ $("form").addEventListener("submit", async (e) => {
     const meta = {
       title: $<HTMLInputElement>("title").value.trim(),
       description: $<HTMLTextAreaElement>("description").value.trim(),
+      projectId: $<HTMLSelectElement>("project").value,
+      versionId: $<HTMLSelectElement>("version").value,
+      componentId: $<HTMLSelectElement>("module").value || undefined,
       severity: $<HTMLSelectElement>("severity").value,
       priority: $<HTMLSelectElement>("priority").value,
-      module: $<HTMLInputElement>("module").value.trim(),
       // Page details can be missing when the tab closed before a recording finished.
       page: draft.page ?? {
         url: "unknown",
@@ -190,12 +431,18 @@ $("form").addEventListener("submit", async (e) => {
     const result = await upload(settings, form, (f) => ($("progress-bar").style.width = `${Math.round(f * 100)}%`));
     submitted = true;
     await deleteDraft(draft.id).catch(() => {});
+    await chrome.storage.local.set({ [LAST_CHOICE]: { projectId: meta.projectId, versionId: meta.versionId } });
 
     $("form").hidden = true;
     $("done").hidden = false;
-    $("done-sub").textContent = `Added to UpTrack as reported bug #${result.number}.`;
+    button.hidden = true;
+    progress.hidden = true;
+    // It's uploaded: editing the capture any further would change nothing.
+    $("tools").hidden = true;
+    $("trim").hidden = true;
+    $("done-sub").textContent = `Added to UpTrack as ${result.key}.`;
     $<HTMLInputElement>("share").value = result.shareUrl;
-    $<HTMLInputElement>("fix").value = `/uptrack:fix-bug reported-${result.number} reported`;
+    $<HTMLInputElement>("fix").value = result.fixCommand;
     $<HTMLAnchorElement>("open-bug").href = result.bugUrl;
   } catch (err) {
     error.textContent = err instanceof ApiError ? err.message : `Something went wrong: ${String(err)}`;
@@ -225,8 +472,9 @@ window.addEventListener("beforeunload", (e) => {
 // ---- Start ----
 
 (async () => {
-  fillSelect("severity", SEVERITIES, "");
-  fillSelect("priority", ["High", "Medium", "Low"], "");
+  fillSelect("severity", SEVERITIES.map((v) => ({ value: v, label: capitalize(v) })), "medium");
+  fillSelect("priority", PRIORITIES.map((v) => ({ value: v, label: capitalize(v) })), "medium");
+  const projectsLoaded = loadProjects();
   const id = new URLSearchParams(location.search).get("draft");
   const found = id ? await getDraft(id) : undefined;
   if (!found) return fail("This capture isn't available any more. Take a new screenshot or recording from the extension.");
@@ -239,5 +487,6 @@ window.addEventListener("beforeunload", (e) => {
   showLog(draft.log);
   if (draft.kind === "image") await setUpImage();
   else setUpVideo();
+  await projectsLoaded;
   $<HTMLInputElement>("title").focus();
 })();

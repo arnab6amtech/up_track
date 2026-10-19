@@ -217,20 +217,19 @@ body.resizing .devtools {
   max-width: 100%;
 }
 
-/* ---- Trimming a recording: thumbnails, a green selection with a handle at each end, and a playhead ---- */
+/* ---- Trimming a recording: thumbnails, a dark translucent selection with a handle at each end, and a playhead ---- */
 
 .trim {
-  --trim: #8ee3c4;
-  --trim-dark: #0f766e;
+  --trim: rgb(17 17 17 / 0.72);
   position: absolute;
   left: 0;
   right: 0;
   bottom: 0;
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 28px 12px 12px;
-  background: linear-gradient(to bottom, transparent, rgb(0 0 0 / 0.5));
+  gap: 8px;
+  padding: 20px 10px 8px;
+  background: linear-gradient(to bottom, transparent, rgb(0 0 0 / 0.45));
   line-height: normal;
 }
 
@@ -238,23 +237,26 @@ body.resizing .devtools {
   flex: none;
   display: grid;
   place-items: center;
-  width: 42px;
-  height: 40px;
+  width: 30px;
+  height: 28px;
   border: 0;
-  border-radius: 8px;
-  background: rgb(255 255 255 / 0.92);
-  color: var(--fg);
-  box-shadow: 0 1px 3px rgb(0 0 0 / 0.25);
+  border-radius: 7px;
+  background: rgb(17 17 17 / 0.72);
+  color: #fff;
   cursor: pointer;
 }
 
 .trim-play:hover {
-  background: #fff;
+  background: rgb(17 17 17 / 0.88);
+}
+
+.trim-play:focus-visible {
+  outline: 2px solid #fff;
 }
 
 .trim-play svg {
-  width: 20px;
-  height: 20px;
+  width: 15px;
+  height: 15px;
 }
 
 .trim-play .icon-pause,
@@ -270,10 +272,9 @@ body.resizing .devtools {
   position: relative;
   flex: 1;
   min-width: 0;
-  height: 40px;
-  border-radius: 8px;
-  background: var(--bg);
-  box-shadow: 0 1px 3px rgb(0 0 0 / 0.25);
+  height: 28px;
+  border-radius: 6px;
+  background: rgb(255 255 255 / 0.85);
   cursor: pointer;
   touch-action: none;
 }
@@ -283,32 +284,32 @@ body.resizing .devtools {
   inset: 0;
   width: 100%;
   height: 100%;
-  border-radius: 8px;
+  border-radius: 6px;
 }
 
-/* The parts left out are washed out. */
+/* The parts left out are darkened. */
 .trim-shade {
   position: absolute;
   top: 0;
   bottom: 0;
   left: 0;
-  border-radius: 8px 0 0 8px;
-  background: rgb(245 245 245 / 0.78);
+  border-radius: 6px 0 0 6px;
+  background: rgb(0 0 0 / 0.5);
   pointer-events: none;
 }
 
 .trim-shade.end {
   left: auto;
   right: 0;
-  border-radius: 0 8px 8px 0;
+  border-radius: 0 6px 6px 0;
 }
 
 .trim-range {
   position: absolute;
   top: 0;
   bottom: 0;
-  border-top: 3px solid var(--trim);
-  border-bottom: 3px solid var(--trim);
+  border-top: 2px solid var(--trim);
+  border-bottom: 2px solid var(--trim);
   pointer-events: none;
 }
 
@@ -318,40 +319,41 @@ body.resizing .devtools {
   bottom: 0;
   display: grid;
   place-items: center;
-  width: 16px;
+  width: 12px;
   background: var(--trim);
-  color: #134e4a;
+  color: #fff;
   cursor: ew-resize;
   outline: none;
 }
 
 .trim-handle.start {
-  border-radius: 8px 0 0 8px;
+  border-radius: 6px 0 0 6px;
 }
 
 .trim-handle.end {
-  border-radius: 0 8px 8px 0;
+  border-radius: 0 6px 6px 0;
 }
 
 .trim-handle svg {
-  width: 4px;
-  height: 14px;
+  width: 3px;
+  height: 11px;
   fill: currentColor;
 }
 
 .trim-handle:hover,
 .trim-handle:focus-visible {
-  background: #6ad6ae;
+  background: rgb(17 17 17 / 0.9);
 }
 
 .trim-playhead {
   position: absolute;
-  top: -5px;
-  bottom: -5px;
+  top: -3px;
+  bottom: -3px;
   width: 2px;
   margin-left: -1px;
   border-radius: 1px;
-  background: var(--trim-dark);
+  background: #fff;
+  box-shadow: 0 0 0 1px rgb(0 0 0 / 0.35);
   pointer-events: none;
 }
 

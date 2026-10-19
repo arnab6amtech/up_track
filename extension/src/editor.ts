@@ -222,7 +222,7 @@ async function setUpImage() {
 // ---- Recording trim ----
 
 const MIN_TRIM_MS = 500;
-const HANDLE_PX = 16;
+const HANDLE_PX = 12;
 
 function setUpVideo() {
   const video = $<HTMLVideoElement>("video");

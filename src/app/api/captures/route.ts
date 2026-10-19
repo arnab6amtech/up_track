@@ -46,6 +46,7 @@ const metaSchema = z.object({
     height: z.number().int().positive().optional(),
     durationMs: ms.optional(),
     trimStartMs: ms.optional(),
+    markers: z.array(z.object({ atMs: ms, label: str(200).optional() })).max(50).optional(),
     trimEndMs: ms.optional(),
   }),
 });
@@ -184,6 +185,7 @@ export async function POST(request: Request) {
         durationMs: meta.media.durationMs,
         trimStartMs: meta.media.trimStartMs,
         trimEndMs: meta.media.trimEndMs,
+        markers: meta.media.kind === "video" && meta.media.markers?.length ? meta.media.markers : undefined,
       },
     ],
     capture: { page: meta.page, log },

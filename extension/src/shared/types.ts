@@ -1,6 +1,6 @@
-import type { CaptureLog, PageInfo } from "../../../src/lib/capture-types";
+import type { CaptureLog, PageInfo, VideoMarker } from "../../../src/lib/capture-types";
 
-export type { CaptureLog, ConsoleEntry, NetworkEntry, NetworkType, PageInfo, ReportableProject } from "../../../src/lib/capture-types";
+export type { CaptureLog, ConsoleEntry, NetworkEntry, NetworkType, PageInfo, ReportableProject, VideoMarker } from "../../../src/lib/capture-types";
 export { describeUserAgent, inFilter, isApiCall, isFailed, LOAD_FAILED, NETWORK_FILTERS, PRIORITIES, SEVERITIES } from "../../../src/lib/capture-types";
 
 /** A screenshot or recording waiting in the editor to be annotated and reported. */
@@ -15,6 +15,8 @@ export interface Draft {
   page: PageInfo | null;
   /** False when the page was open before the extension was installed, so nothing was recorded. */
   logAvailable: boolean;
+  /** Recordings: moments marked while recording. */
+  markers?: VideoMarker[];
   createdAt: number;
 }
 
@@ -25,6 +27,8 @@ export interface RecordingState {
   pausedAt: number | null;
   /** Time spent paused before the current pause, in milliseconds. */
   pausedMs: number;
+  /** Moments the reporter marked ("the bug happens here"), as recorded time in milliseconds. */
+  marks: number[];
 }
 
 /** How long a recording has run, leaving out pauses. */
@@ -35,6 +39,7 @@ export type BackgroundMessage =
   | { type: "screenshot"; tabId: number; windowId: number }
   | { type: "record-start"; tabId: number }
   | { type: "record-stop" }
+  | { type: "record-mark" }
   | { type: "record-pause" }
   | { type: "record-resume" }
   | { type: "state" }

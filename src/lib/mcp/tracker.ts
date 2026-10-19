@@ -171,7 +171,12 @@ export async function getTrackerBug(caller: TokenCaller, key: string, baseUrl: s
   const media = bug.attachments.filter((a) => a.kind === "image" || a.kind === "video");
   if (media.length) {
     lines.push("", "## References", "Call get_bug_reference to view the screenshots.");
-    media.forEach((a, i) => lines.push(`${i + 1}. ${a.kind === "image" ? "Screenshot" : "Recording"} "${a.fileName}"`));
+    const clock = (ms: number) => `${Math.floor(ms / 60000)}:${String(Math.floor(ms / 1000) % 60).padStart(2, "0")}`;
+    media.forEach((a, i) => {
+      lines.push(`${i + 1}. ${a.kind === "image" ? "Screenshot" : "Recording"} "${a.fileName}"`);
+      // Where the reporter said the bug shows up in the recording.
+      for (const m of a.markers ?? []) lines.push(`   - Marked at ${clock(m.atMs)}${m.label ? `: ${m.label}` : ""}`);
+    });
   }
 
   if (bug.capture) {

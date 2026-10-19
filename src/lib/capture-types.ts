@@ -96,6 +96,12 @@ export interface CaptureLog {
   console: ConsoleEntry[];
 }
 
+/** A moment the reporter marked in a recording, in milliseconds from its start, with an optional note. */
+export interface VideoMarker {
+  atMs: number;
+  label?: string;
+}
+
 /** What the extension sends as the `meta` part of an upload to /api/captures. */
 export interface CaptureUploadMeta {
   projectId: string;
@@ -116,6 +122,7 @@ export interface CaptureUploadMeta {
     /** Part of a recording viewers are shown; the full file is kept. */
     trimStartMs?: number;
     trimEndMs?: number;
+    markers?: VideoMarker[];
   };
 }
 

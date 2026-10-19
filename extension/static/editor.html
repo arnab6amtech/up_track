@@ -49,11 +49,15 @@
                   <svg class="icon-play" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" aria-hidden="true"><path d="M6 4.2v11.6L15.5 10 6 4.2Z" /></svg>
                   <svg class="icon-pause" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><rect x="5.5" y="4.5" width="3" height="11" rx="1" /><rect x="11.5" y="4.5" width="3" height="11" rx="1" /></svg>
                 </button>
+                <button type="button" class="trim-play" id="trim-mark" title="Mark this moment: where the bug shows up (M)" aria-label="Mark this moment">
+                  <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 17.5V3" /><path d="M5 3.5h9.5l-2 3.5 2 3.5H5" /></svg>
+                </button>
                 <div class="trim-track" id="trim-track">
                   <canvas class="trim-film" id="trim-film"></canvas>
                   <div class="trim-shade" id="trim-shade-start"></div>
                   <div class="trim-shade end" id="trim-shade-end"></div>
                   <div class="trim-range" id="trim-range"></div>
+                  <div class="trim-marks" id="trim-marks"></div>
                   <div class="trim-handle start" id="trim-start" role="slider" tabindex="0" aria-label="Trim start"><svg viewBox="0 0 4 14" aria-hidden="true"><circle cx="2" cy="2" r="1.5" /><circle cx="2" cy="7" r="1.5" /><circle cx="2" cy="12" r="1.5" /></svg></div>
                   <div class="trim-handle end" id="trim-end" role="slider" tabindex="0" aria-label="Trim end"><svg viewBox="0 0 4 14" aria-hidden="true"><circle cx="2" cy="2" r="1.5" /><circle cx="2" cy="7" r="1.5" /><circle cx="2" cy="12" r="1.5" /></svg></div>
                   <div class="trim-playhead" id="trim-playhead"></div>
@@ -73,6 +77,10 @@
             placeholder="Steps to reproduce, what you expected, what happened"
             aria-label="Description"
           ></textarea>
+          <div class="markers" id="markers" hidden>
+            <p class="markers-title">Marked moments <span class="muted">· where the bug shows up</span></p>
+            <ul id="marker-list"></ul>
+          </div>
           <div class="fields">
             <div class="field">
               <label for="project">Project</label>

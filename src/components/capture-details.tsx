@@ -9,7 +9,7 @@ export function attachmentUrl(id: string, shareToken?: string) {
 
 /** Screenshots and recordings as gallery items (the API log is shown separately). */
 export function mediaLinks(
-  attachments: Pick<Attachment, "id" | "kind" | "fileName" | "trimStartMs" | "trimEndMs">[],
+  attachments: (Pick<Attachment, "id" | "kind" | "fileName" | "trimStartMs" | "trimEndMs"> & Partial<Pick<Attachment, "markers">>)[],
   shareToken?: string,
 ): MediaLink[] {
   return attachments
@@ -21,7 +21,7 @@ export function mediaLinks(
         a.kind === "video" && (a.trimStartMs != null || a.trimEndMs != null)
           ? `#t=${(a.trimStartMs ?? 0) / 1000}${a.trimEndMs != null ? `,${a.trimEndMs / 1000}` : ""}`
           : "";
-      return { url, kind: a.kind as "image" | "video", src: `${url}${trim}`, label: a.fileName };
+      return { url, kind: a.kind as "image" | "video", src: `${url}${trim}`, label: a.fileName, ...(a.markers?.length ? { markers: a.markers } : {}) };
     });
 }
 

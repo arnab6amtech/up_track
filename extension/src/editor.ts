@@ -23,6 +23,8 @@ const COLORS = ["#e11d48", "#f97316", "#facc15", "#16a34a", "#2563eb", "#0a0a0a"
 let draft: Draft;
 let annotator: Annotator | null = null;
 let trim = { start: 0, end: 0 };
+/** Moments marked in a recording ("the bug happens here"), in milliseconds, with an optional note. */
+let markers: { atMs: number; label: string }[] = [];
 let submitted = false;
 
 function fail(message: string) {
@@ -248,6 +250,14 @@ function setUpVideo() {
     startHandle.style.left = at(s);
     endHandle.style.left = `calc(${at(e)} - ${HANDLE_PX}px)`;
     $("trim-playhead").style.left = at(share(video.currentTime * 1000));
+    // Moments outside the trimmed part aren't sent; say so on their pins and rows.
+    markers.forEach((m, i) => {
+      const outside = m.atMs < trim.start || m.atMs > trim.end;
+      $("trim-marks").children[i]?.classList.toggle("outside", outside);
+      const row = $("marker-list").children[i];
+      row?.classList.toggle("outside", outside);
+      row?.setAttribute("title", outside ? "Outside the trimmed part, so it won't be sent" : "");
+    });
     for (const [handle, ms] of [
       [startHandle, trim.start],
       [endHandle, trim.end],
@@ -358,6 +368,78 @@ function setUpVideo() {
     });
   }
   window.addEventListener("resize", layout);
+
+  // ---- Marked moments: pins on the timeline and a list with notes in the form ----
+
+  markers = (draft.markers ?? []).map((m) => ({ atMs: m.atMs, label: m.label ?? "" }));
+  const seek = (ms: number) => {
+    video.pause();
+    video.currentTime = Math.min(Math.max(ms, 0), duration()) / 1000;
+    layout();
+  };
+  const renderMarkers = () => {
+    markers.sort((a, b) => a.atMs - b.atMs);
+    $("trim-marks").replaceChildren(
+      ...markers.map((m) => {
+        const pin = el("button", "trim-pin");
+        pin.type = "button";
+        pin.style.left = at(share(m.atMs));
+        pin.title = `${formatTime(m.atMs)}${m.label ? ` · ${m.label}` : ""}`;
+        pin.setAttribute("aria-label", `Marked moment at ${formatTime(m.atMs)}`);
+        pin.addEventListener("pointerdown", (e) => e.stopPropagation());
+        pin.addEventListener("click", () => seek(m.atMs));
+        return pin;
+      }),
+    );
+    $("markers").hidden = markers.length === 0;
+    $("marker-list").replaceChildren(
+      ...markers.map((m) => {
+        const item = el("li", "marker");
+        const time = el("button", "marker-time", formatTime(m.atMs));
+        time.type = "button";
+        time.title = "Show this moment";
+        time.addEventListener("click", () => seek(m.atMs));
+        const note = el("input", "marker-note");
+        note.value = m.label;
+        note.maxLength = 200;
+        note.placeholder = "What happens here? (optional)";
+        note.setAttribute("aria-label", `Note for the moment at ${formatTime(m.atMs)}`);
+        note.addEventListener("input", () => (m.label = note.value));
+        const remove = el("button", "marker-remove", "×");
+        remove.type = "button";
+        remove.title = "Remove this moment";
+        remove.setAttribute("aria-label", `Remove the moment at ${formatTime(m.atMs)}`);
+        remove.addEventListener("click", () => {
+          markers.splice(markers.indexOf(m), 1);
+          showMarkers();
+        });
+        item.append(time, note, remove);
+        return item;
+      }),
+    );
+  };
+  const addMarker = () => {
+    const atMs = Math.round(video.currentTime * 1000);
+    if (markers.some((m) => Math.abs(m.atMs - atMs) < 250)) return;
+    const added = { atMs, label: "" };
+    markers.push(added);
+    showMarkers();
+    $("marker-list").children[markers.indexOf(added)]?.querySelector("input")?.focus();
+  };
+  $("trim-mark").addEventListener("click", addMarker);
+  const showMarkers = () => {
+    renderMarkers();
+    layout();
+  };
+  // M marks the moment on screen, unless typing.
+  document.addEventListener("keydown", (e) => {
+    if (e.key.toLowerCase() !== "m" || e.metaKey || e.ctrlKey || e.altKey) return;
+    if ((e.target as HTMLElement).closest("input, textarea, select, [contenteditable]")) return;
+    e.preventDefault();
+    addMarker();
+  });
+  // Pins need the length of the recording to be placed.
+  video.addEventListener("loadedmetadata", showMarkers);
 }
 
 /** Thumbnails of the recording along the trim track, drawn from a second, hidden copy of the video. */
@@ -824,6 +906,14 @@ $("form").addEventListener("submit", async (e) => {
         height: draft.height,
         durationMs: draft.durationMs,
         ...(trimmed ? { trimStartMs: Math.round(trim.start), trimEndMs: Math.round(trim.end) } : {}),
+        // Only the moments viewers can see, i.e. inside the trimmed part.
+        ...(isImage
+          ? {}
+          : {
+              markers: markers
+                .filter((m) => m.atMs >= trim.start && m.atMs <= trim.end)
+                .map((m) => ({ atMs: m.atMs, ...(m.label.trim() ? { label: m.label.trim().slice(0, 200) } : {}) })),
+            }),
       },
     };
     const log = chosenLog();

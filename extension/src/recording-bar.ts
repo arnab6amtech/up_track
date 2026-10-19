@@ -14,6 +14,7 @@ const ICONS = {
   stop: '<svg viewBox="0 0 20 20"><rect x="3.5" y="3.5" width="13" height="13" rx="3" fill="#f43f5e"/></svg>',
   pause: '<svg viewBox="0 0 20 20" fill="currentColor"><rect x="5" y="4" width="3.5" height="12" rx="1.2"/><rect x="11.5" y="4" width="3.5" height="12" rx="1.2"/></svg>',
   resume: '<svg viewBox="0 0 20 20" fill="currentColor"><path d="M6.5 4.2a1 1 0 0 1 1.5-.86l8.2 5.03a1 1 0 0 1 0 1.71L8 15.12a1 1 0 0 1-1.5-.86V4.2Z"/></svg>',
+  mark: '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 17.5V3"/><path d="M5 3.5h9.5l-2 3.5 2 3.5H5"/></svg>',
   pen: '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="m13.5 3.5 3 3L7 16H4v-3l9.5-9.5Z"/><path d="M3 18.5c2.5-1.2 5-1.2 7.5 0s5 1.2 7.5 0"/></svg>',
   blur: '<svg viewBox="0 0 20 20"><g fill="currentColor"><rect x="3" y="3" width="4.6" height="4.6" rx="1"/><rect x="12.4" y="3" width="4.6" height="4.6" rx="1" opacity=".55"/><rect x="7.7" y="7.7" width="4.6" height="4.6" rx="1" opacity=".8"/><rect x="3" y="12.4" width="4.6" height="4.6" rx="1" opacity=".4"/><rect x="12.4" y="12.4" width="4.6" height="4.6" rx="1"/><rect x="7.7" y="3" width="4.6" height="4.6" rx="1" opacity=".25"/><rect x="3" y="7.7" width="4.6" height="4.6" rx="1" opacity=".7"/><rect x="12.4" y="7.7" width="4.6" height="4.6" rx="1" opacity=".3"/><rect x="7.7" y="12.4" width="4.6" height="4.6" rx="1" opacity=".6"/></g></svg>',
   grip: '<svg viewBox="0 0 20 20" fill="currentColor"><circle cx="7" cy="5" r="1.4"/><circle cx="13" cy="5" r="1.4"/><circle cx="7" cy="10" r="1.4"/><circle cx="13" cy="10" r="1.4"/><circle cx="7" cy="15" r="1.4"/><circle cx="13" cy="15" r="1.4"/></svg>',
@@ -46,6 +47,10 @@ const BAR_CSS = `
   .stop svg { width: 22px; height: 22px; }
   .time { min-width: 52px; padding: 0 6px; text-align: center; font-variant-numeric: tabular-nums; letter-spacing: 0.02em; }
   .paused .time { color: #fbbf24; }
+  .mark { position: relative; }
+  .mark.flash { background: rgb(251 191 36 / 0.35); }
+  .mark .count { position: absolute; top: 3px; right: 2px; min-width: 13px; height: 13px; padding: 0 3px; border-radius: 7px;
+    background: #fbbf24; color: #111; font: 700 9px/13px system-ui, sans-serif; text-align: center; box-sizing: border-box; }
   .sep { width: 1px; height: 20px; margin: 0 4px; background: rgb(255 255 255 / 0.18); }
   .grip { display: grid; place-items: center; width: 18px; height: 34px; margin-left: 2px; color: rgb(255 255 255 / 0.45); cursor: grab; }
   .grip:active { cursor: grabbing; }
@@ -61,6 +66,7 @@ interface Controls {
   time: HTMLElement;
   pause: HTMLButtonElement;
   stop: HTMLButtonElement;
+  mark: HTMLButtonElement;
   tools: HTMLButtonElement[];
 }
 
@@ -118,6 +124,11 @@ async function setUp() {
     controls.pause.innerHTML = paused ? ICONS.resume : ICONS.pause;
     controls.pause.title = paused ? "Resume" : "Pause";
     controls.pause.setAttribute("aria-label", paused ? "Resume recording" : "Pause recording");
+    const marks = state.marks?.length ?? 0;
+    let count = controls.mark.querySelector<HTMLElement>(".count");
+    if (marks && !count) count = controls.mark.appendChild(Object.assign(document.createElement("span"), { className: "count" }));
+    if (count) count.textContent = String(marks);
+    controls.mark.setAttribute("aria-label", marks ? `Mark this moment (${marks} marked)` : "Mark this moment");
   };
   const ticker = setInterval(() => {
     if (!connected()) return teardown();
@@ -146,6 +157,7 @@ async function setUp() {
       <button class="stop" title="Stop and review" aria-label="Stop recording">${ICONS.stop}</button>
       <button class="pause" title="Pause" aria-label="Pause recording">${ICONS.pause}</button>
       <span class="time" aria-live="off">0:00</span>
+      <button class="mark" title="Mark this moment: where the bug shows up" aria-label="Mark this moment">${ICONS.mark}</button>
       <span class="sep"></span>
       <button class="tool" data-tool="pen" title="Draw on the page" aria-pressed="false" aria-label="Pen">${ICONS.pen}</button>
       <button class="tool" data-tool="blur" title="Blur part of the page: drag over it. Click a blur to remove it." aria-pressed="false" aria-label="Blur">${ICONS.blur}</button>
@@ -157,6 +169,7 @@ async function setUp() {
       time: bar.querySelector(".time")!,
       pause: bar.querySelector(".pause")!,
       stop: bar.querySelector(".stop")!,
+      mark: bar.querySelector(".mark")!,
       tools: [...bar.querySelectorAll<HTMLButtonElement>(".tool")],
     };
     made.pause.addEventListener("click", async () => {
@@ -172,6 +185,13 @@ async function setUp() {
       made.time.textContent = "Saving…";
       clearInterval(ticker);
       await send({ type: "record-stop" });
+    });
+    made.mark.addEventListener("click", async () => {
+      const result = await send({ type: "record-mark" });
+      if (result?.recording) state = result.recording;
+      made.mark.classList.add("flash");
+      setTimeout(() => made.mark.classList.remove("flash"), 500);
+      showState();
     });
     made.tools.forEach((b) => b.addEventListener("click", () => setTool(b.dataset.tool as Tool)));
     makeMovable(bar);

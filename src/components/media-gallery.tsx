@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { MediaLink } from "@/lib/types";
 
 /** `stacked` keeps one column, for narrow places like the details sidebar and the drawer. */
@@ -82,16 +82,7 @@ function MediaView({ item, onZoom }: { item: MediaLink; onZoom: (src: string) =>
         </button>
       );
     case "video":
-      return (
-        <video
-          src={item.src}
-          controls
-          playsInline
-          preload="metadata"
-          onError={() => item.kind === "probe" && setFallback("link")}
-          className="aspect-video w-full bg-black"
-        />
-      );
+      return <VideoView item={item} onError={() => item.kind === "probe" && setFallback("link")} />;
     default:
       return (
         <a
@@ -107,6 +98,49 @@ function MediaView({ item, onZoom }: { item: MediaLink; onZoom: (src: string) =>
         </a>
       );
   }
+}
+
+const clock = (ms: number) => {
+  const s = Math.floor(ms / 1000);
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+};
+
+/** A recording, with the moments its reporter marked listed under it; clicking one plays from there. */
+function VideoView({ item, onError }: { item: MediaLink; onError: () => void }) {
+  const video = useRef<HTMLVideoElement>(null);
+  const markers = [...(item.markers ?? [])].sort((a, b) => a.atMs - b.atMs);
+  const jump = (atMs: number) => {
+    const v = video.current;
+    if (!v) return;
+    v.currentTime = atMs / 1000;
+    void v.play().catch(() => {});
+  };
+  return (
+    <>
+      <video ref={video} src={item.src} controls playsInline preload="metadata" onError={onError} className="aspect-video w-full bg-black" />
+      {markers.length > 0 && (
+        <div className="space-y-1.5 border-t border-line px-3 py-2.5">
+          <p className="text-xs font-medium text-muted">Marked moments</p>
+          <ul className="space-y-1">
+            {markers.map((m, i) => (
+              <li key={i}>
+                <button
+                  type="button"
+                  onClick={() => jump(m.atMs)}
+                  className="flex w-full items-start gap-2 rounded-md px-1.5 py-1 text-left text-sm hover:bg-surface-2"
+                >
+                  <span className="shrink-0 rounded bg-accent px-1.5 py-0.5 font-mono text-xs font-medium text-white tabular-nums">
+                    {clock(m.atMs)}
+                  </span>
+                  <span className={m.label ? "" : "text-muted"}>{m.label || "Marked by the reporter"}</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </>
+  );
 }
 
 function DriveView({ item, onZoom }: { item: MediaLink; onZoom: (src: string) => void }) {

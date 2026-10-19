@@ -6,6 +6,7 @@ import { pageInfo } from "./shared/page-info";
 import { isRestricted } from "./shared/restricted";
 import {
   MAX_RECORDING_MS,
+  recordedMs,
   type BackgroundMessage,
   type CaptureLog,
   type OffscreenMessage,
@@ -52,6 +53,8 @@ async function handle(message: BackgroundMessage, sender: chrome.runtime.Message
     case "record-stop":
       await sendToOffscreen({ target: "offscreen", type: "stop" });
       return;
+    case "record-mark":
+      return markMoment();
     case "record-pause":
       return setPaused(true);
     case "record-resume":
@@ -138,7 +141,7 @@ async function startRecording(tabId: number) {
     throw new Error(started?.error ?? "The recording couldn't start.");
   }
 
-  const state: RecordingState = { tabId, startedAt: Date.now(), pausedAt: null, pausedMs: 0 };
+  const state: RecordingState = { tabId, startedAt: Date.now(), pausedAt: null, pausedMs: 0, marks: [] };
   await chrome.storage.session.set({ [RECORDING_KEY]: state });
   await showRecordingBar(tabId);
   return { recording: state };
@@ -151,6 +154,15 @@ async function showRecordingBar(tabId: number) {
 
 function tellTab(tabId: number, message: TabMessage) {
   return chrome.tabs.sendMessage(tabId, message).catch(() => {});
+}
+
+/** Notes the current moment of the recording, so the reporter can point at where the bug shows up. */
+async function markMoment() {
+  const recording = await getRecording();
+  if (!recording) return { recording };
+  const next: RecordingState = { ...recording, marks: [...recording.marks, Math.max(0, recordedMs(recording))] };
+  await chrome.storage.session.set({ [RECORDING_KEY]: next });
+  return { recording: next };
 }
 
 async function setPaused(paused: boolean) {
@@ -172,15 +184,17 @@ async function finishRecording(draftId: string) {
   const tab = recording ? await chrome.tabs.get(recording.tabId).catch(() => undefined) : undefined;
   const draft = await getDraft(draftId).catch(() => undefined);
   if (!draft) return openEditor(null, tab, "The recording was made but couldn't be found afterwards. Please record again.");
+  let ready: typeof draft = { ...draft, markers: (recording?.marks ?? []).map((atMs) => ({ atMs: Math.round(atMs) })) };
   // The page's log is a bonus: if it can't be read, open the recording without it rather than not at all.
   try {
     const { log, page, logAvailable } = tab
       ? await collectLog(tab.id!)
       : { log: { network: [], console: [] }, page: null, logAvailable: false };
-    await saveDraft({ ...draft, log, page, logAvailable });
+    ready = { ...ready, log, page, logAvailable };
   } catch (err) {
     console.error("[UpTrack] Couldn't attach the page's log to the recording:", err);
   }
+  await saveDraft(ready).catch((err) => console.error("[UpTrack] Couldn't save the recording's details:", err));
   await openEditor(draftId, tab);
 }
 

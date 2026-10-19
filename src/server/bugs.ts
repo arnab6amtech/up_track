@@ -9,6 +9,7 @@ import {
   type PageInfo,
   type Priority,
   type Severity,
+  type VideoMarker,
 } from "@/lib/capture-types";
 import { newToken, sha256 } from "./auth/crypto";
 import { getDb, inOrg, one, type Queryable } from "./db";
@@ -190,6 +191,8 @@ export interface Attachment {
   durationMs: number | null;
   trimStartMs: number | null;
   trimEndMs: number | null;
+  /** Moments the reporter marked in a recording. */
+  markers: VideoMarker[] | null;
   createdAt: Date;
 }
 
@@ -276,7 +279,8 @@ const DETAIL_SQL = `
 async function loadExtras(tx: Queryable, bug: Omit<BugDetail, "attachments" | "capture">): Promise<BugDetail> {
   const attachments = await tx.query<Attachment>(
     `select id, kind, file_name as "fileName", content_type as "contentType", size_bytes::int as "sizeBytes", width, height,
-            duration_ms as "durationMs", trim_start_ms as "trimStartMs", trim_end_ms as "trimEndMs", created_at as "createdAt"
+            duration_ms as "durationMs", trim_start_ms as "trimStartMs", trim_end_ms as "trimEndMs",
+            markers, created_at as "createdAt"
        from bug_attachments where bug_id = $1 and deleted_at is null order by created_at`,
     [bug.id],
   );
@@ -320,6 +324,8 @@ export interface NewAttachment {
   durationMs?: number;
   trimStartMs?: number;
   trimEndMs?: number;
+  /** Moments the reporter marked in a recording. */
+  markers?: VideoMarker[];
 }
 
 export interface NewBug {
@@ -417,11 +423,12 @@ export async function createBug(orgId: string, input: NewBug): Promise<{ id: str
         const row = await one<{ id: string }>(
           tx,
           `insert into bug_attachments (organization_id, bug_id, kind, storage_key, file_name, content_type, size_bytes,
-                                        width, height, duration_ms, trim_start_ms, trim_end_ms, uploaded_by)
-           values ($1, $2, $3::attachment_kind, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) returning id`,
+                                        width, height, duration_ms, trim_start_ms, trim_end_ms, uploaded_by, markers)
+           values ($1, $2, $3::attachment_kind, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14::jsonb) returning id`,
           [orgId, bugId, file.kind, key, file.fileName.slice(0, 255), file.contentType, file.bytes.byteLength,
            file.width ?? null, file.height ?? null, file.durationMs != null ? Math.round(file.durationMs) : null,
-           file.trimStartMs ?? null, file.trimEndMs ?? null, input.reporterId],
+           file.trimStartMs ?? null, file.trimEndMs ?? null, input.reporterId,
+           file.markers?.length ? JSON.stringify(file.markers) : null],
         );
         if (file.kind === "log") logAttachmentId = row!.id;
       }

@@ -25,8 +25,8 @@ export function mediaLinks(
     });
 }
 
-/** Page and browser details plus the API/console log captured by the browser extension. */
-export function CaptureDetails({ capture: c, shareToken }: { capture: CaptureInfo; shareToken?: string }) {
+/** Page and browser details the browser extension recorded with the bug. */
+export function CapturedPage({ capture: c, heading = true }: { capture: CaptureInfo; heading?: boolean }) {
   const env: [string, React.ReactNode][] = [
     [
       "Page",
@@ -41,29 +41,44 @@ export function CaptureDetails({ capture: c, shareToken }: { capture: CaptureInf
     ["Time zone", c.timezone || "—"],
   ];
   return (
-    <div className="space-y-4">
-      <section className="rounded-xl border border-line bg-surface p-4">
-        <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted">Captured page</h2>
-        <dl className="grid gap-x-6 gap-y-2 text-sm sm:grid-cols-[7rem_1fr]">
-          {env.map(([k, v]) => (
-            <div key={k} className="contents">
-              <dt className="text-muted">{k}</dt>
-              <dd className="min-w-0">{v}</dd>
-            </div>
-          ))}
-        </dl>
-      </section>
-      {c.logAttachmentId && (
-        <section className="space-y-2">
-          <h2 className="text-sm font-semibold">
-            API calls and console{" "}
-            <span className="font-normal text-muted">
-              ({c.failedRequestCount} failed of {c.requestCount} · {c.consoleErrorCount} console errors)
-            </span>
-          </h2>
-          <CaptureLogPanel logUrl={attachmentUrl(c.logAttachmentId, shareToken)} failedCount={c.failedRequestCount} />
-        </section>
+    <section className="rounded-xl border border-line bg-surface p-4">
+      {heading && <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted">Captured page</h2>}
+      <dl className="grid gap-x-6 gap-y-2 text-sm sm:grid-cols-[7rem_1fr]">
+        {env.map(([k, v]) => (
+          <div key={k} className="contents">
+            <dt className="text-muted">{k}</dt>
+            <dd className="min-w-0">{v}</dd>
+          </div>
+        ))}
+      </dl>
+    </section>
+  );
+}
+
+/** The page's API calls and console log, with a one-line summary (or a heading, standing alone). */
+export function CaptureLog({ capture: c, shareToken, heading = true }: { capture: CaptureInfo; shareToken?: string; heading?: boolean }) {
+  if (!c.logAttachmentId) return null;
+  const summary = `${c.failedRequestCount} failed of ${c.requestCount} · ${c.consoleErrorCount} console errors`;
+  return (
+    <section className="space-y-2">
+      {heading ? (
+        <h2 className="text-sm font-semibold">
+          API calls and console <span className="font-normal text-muted">({summary})</span>
+        </h2>
+      ) : (
+        <p className="text-xs text-muted">{summary}</p>
       )}
+      <CaptureLogPanel logUrl={attachmentUrl(c.logAttachmentId, shareToken)} failedCount={c.failedRequestCount} />
+    </section>
+  );
+}
+
+/** Page and browser details plus the API/console log captured by the browser extension. */
+export function CaptureDetails({ capture, shareToken }: { capture: CaptureInfo; shareToken?: string }) {
+  return (
+    <div className="space-y-4">
+      <CapturedPage capture={capture} />
+      <CaptureLog capture={capture} shareToken={shareToken} />
     </div>
   );
 }

@@ -65,6 +65,25 @@ export function CopyFixButton({ id, workbook }: { id: string; workbook?: string 
   );
 }
 
+/** Compact button beside a bug's title: copies the fix command to paste into an AI agent. */
+export function CopyFixChip({ id, workbook }: { id: string; workbook?: string }) {
+  const command = fixBugCommand(id, workbook);
+  const { state, copy } = useCopy(command);
+  return (
+    <button
+      type="button"
+      onClick={copy}
+      title={`Copy “${command}” to paste into your AI agent`}
+      className={`inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md border px-2.5 text-xs font-medium transition ${
+        state === "copied" ? "border-accent bg-accent text-white" : "border-line bg-surface hover:border-accent"
+      }`}
+    >
+      <SparkleIcon />
+      {state === "copied" ? "Command copied" : state === "failed" ? "Couldn't copy" : "Fix with AI"}
+    </button>
+  );
+}
+
 /** Full-width version for the details page: shows the command itself next to the copy button. */
 export function AgentCommandBar({ id, workbook }: { id: string; workbook?: string }) {
   const command = fixBugCommand(id, workbook);

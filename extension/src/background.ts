@@ -11,6 +11,7 @@ import {
   type OffscreenMessage,
   type PageInfo,
   type RecordingState,
+  type TabMessage,
 } from "./shared/types";
 
 const RECORDING_KEY = "recording";
@@ -29,10 +30,19 @@ chrome.runtime.onMessage.addListener((message: BackgroundMessage | OffscreenMess
   return true;
 });
 
+// The recorded tab loaded a new page: put the recording toolbar back on it.
+chrome.tabs.onUpdated.addListener(async (tabId, change) => {
+  if (change.status !== "complete") return;
+  const recording = await getRecording();
+  if (recording?.tabId === tabId) await showRecordingBar(tabId);
+});
+
 chrome.tabs.onRemoved.addListener(async (tabId) => {
   await chrome.storage.session.remove(stashKey(tabId));
   const recording = await getRecording();
-  if (recording?.tabId === tabId) await sendToOffscreen({ target: "offscreen", type: "stop" }).catch(() => {});
+  if (recording?.tabId !== tabId) return;
+  if (recording.phase === "ready") await cancelRecording();
+  else await sendToOffscreen({ target: "offscreen", type: "stop" }).catch(() => {});
 });
 
 async function handle(message: BackgroundMessage, sender: chrome.runtime.MessageSender): Promise<object | void> {
@@ -41,16 +51,32 @@ async function handle(message: BackgroundMessage, sender: chrome.runtime.Message
       return takeScreenshot(message.tabId, message.windowId);
     case "record-start":
       return startRecording(message.tabId);
+    case "record-begin":
+      return beginRecording();
+    case "record-cancel":
+      return cancelRecording();
     case "record-stop":
+      // Stopping before it began is cancelling: there's nothing to keep.
+      if ((await getRecording())?.phase === "ready") return cancelRecording();
       await sendToOffscreen({ target: "offscreen", type: "stop" });
       return;
+    case "record-pause":
+      return setPaused(true);
+    case "record-resume":
+      return setPaused(false);
     case "state":
       return { recording: await getRecording() };
     case "recording-done":
       return finishRecording(message.draftId);
-    case "recording-failed":
+    case "recording-failed": {
+      // Say what went wrong rather than dropping the recording silently.
+      const recording = await getRecording();
       await clearRecording();
+      console.error("[UpTrack] The recording couldn't be saved:", message.error);
+      const tab = recording ? await chrome.tabs.get(recording.tabId).catch(() => undefined) : undefined;
+      await openEditor(null, tab, `The recording couldn't be saved: ${message.error}`);
       return;
+    }
     case "stash-log":
       if (sender.tab?.id !== undefined) await stashLog(sender.tab.id, message.log);
       return;
@@ -89,6 +115,8 @@ async function getRecording(): Promise<RecordingState | null> {
 }
 
 async function clearRecording() {
+  const recording = await getRecording();
+  if (recording) await tellTab(recording.tabId, { type: "recording-ended" });
   await chrome.storage.session.remove(RECORDING_KEY);
   await chrome.action.setBadgeText({ text: "" });
   if (await chrome.offscreen.hasDocument()) await chrome.offscreen.closeDocument();
@@ -109,7 +137,7 @@ async function startRecording(tabId: number) {
   }
   const started = (await sendToOffscreen({
     target: "offscreen",
-    type: "start",
+    type: "prepare",
     streamId,
     maxMs: MAX_RECORDING_MS,
   })) as { ok: boolean; error?: string };
@@ -118,24 +146,65 @@ async function startRecording(tabId: number) {
     throw new Error(started?.error ?? "The recording couldn't start.");
   }
 
-  const state: RecordingState = { tabId, startedAt: Date.now() };
+  // Ready, not recording yet: the page shows a Start button, whose click opens the controls' floating window.
+  const state: RecordingState = { tabId, phase: "ready", startedAt: 0, pausedAt: null, pausedMs: 0 };
   await chrome.storage.session.set({ [RECORDING_KEY]: state });
-  await chrome.action.setBadgeBackgroundColor({ color: "#dc2626" });
-  await chrome.action.setBadgeText({ text: "REC" });
+  await showRecordingBar(tabId);
   return { recording: state };
+}
+
+/** The recording controls and the page's pen and blur (see recording-bar.ts). */
+async function showRecordingBar(tabId: number) {
+  await chrome.scripting.executeScript({ target: { tabId }, files: ["recording-bar.js"] }).catch(() => {});
+}
+
+function tellTab(tabId: number, message: TabMessage) {
+  return chrome.tabs.sendMessage(tabId, message).catch(() => {});
+}
+
+async function beginRecording() {
+  const recording = await getRecording();
+  if (!recording || recording.phase !== "ready") return { recording };
+  await sendToOffscreen({ target: "offscreen", type: "begin" });
+  const next: RecordingState = { ...recording, phase: "recording", startedAt: Date.now() };
+  await chrome.storage.session.set({ [RECORDING_KEY]: next });
+  return { recording: next };
+}
+
+async function cancelRecording() {
+  await sendToOffscreen({ target: "offscreen", type: "cancel" }).catch(() => {});
+  await clearRecording();
+}
+
+async function setPaused(paused: boolean) {
+  const recording = await getRecording();
+  if (!recording || recording.phase !== "recording" || (recording.pausedAt !== null) === paused) return { recording };
+  await sendToOffscreen({ target: "offscreen", type: paused ? "pause" : "resume" });
+  const now = Date.now();
+  const next: RecordingState = paused
+    ? { ...recording, pausedAt: now }
+    : { ...recording, pausedAt: null, pausedMs: recording.pausedMs + (now - (recording.pausedAt ?? now)) };
+  await chrome.storage.session.set({ [RECORDING_KEY]: next });
+  await tellTab(next.tabId, { type: "recording-state", recording: next });
+  return { recording: next };
 }
 
 async function finishRecording(draftId: string) {
   const recording = await getRecording();
   await clearRecording();
-  const draft = await getDraft(draftId);
-  if (!draft || !recording) return;
-  const tab = await chrome.tabs.get(recording.tabId).catch(() => null);
-  const { log, page, logAvailable } = tab
-    ? await collectLog(recording.tabId)
-    : { log: { network: [], console: [] }, page: null, logAvailable: false };
-  await saveDraft({ ...draft, log, page, logAvailable });
-  await openEditor(draftId, tab ?? undefined);
+  const tab = recording ? await chrome.tabs.get(recording.tabId).catch(() => undefined) : undefined;
+  const draft = await getDraft(draftId).catch(() => undefined);
+  if (!draft) return openEditor(null, tab, "The recording was made but couldn't be found afterwards. Please record again.");
+  // The page's log is a bonus: if it can't be read, open the recording without it rather than not at all.
+  try {
+    const { log, page, logAvailable } = tab
+      ? await collectLog(tab.id!)
+      : { log: { network: [], console: [] }, page: null, logAvailable: false };
+    await saveDraft({ ...draft, log, page, logAvailable });
+  } catch (err) {
+    console.error("[UpTrack] Couldn't attach the page's log to the recording:", err);
+  }
+  await openEditor(draftId, tab);
 }
 
 function sendToOffscreen(message: OffscreenMessage): Promise<unknown> {
@@ -183,10 +252,14 @@ async function collectLog(tabId: number): Promise<{ log: CaptureLog; page: PageI
   };
 }
 
-async function openEditor(draftId: string, tab?: chrome.tabs.Tab) {
-  await chrome.tabs.create({
-    url: chrome.runtime.getURL(`editor.html?draft=${encodeURIComponent(draftId)}`),
-    index: tab?.index !== undefined ? tab.index + 1 : undefined,
-    windowId: tab?.windowId,
-  });
+/** Opens the editor next to the captured tab, or anywhere if that fails; with an error, it just shows the error. */
+async function openEditor(draftId: string | null, tab?: chrome.tabs.Tab, error?: string) {
+  const query = error ? `error=${encodeURIComponent(error)}` : `draft=${encodeURIComponent(draftId!)}`;
+  const url = chrome.runtime.getURL(`editor.html?${query}`);
+  try {
+    await chrome.tabs.create({ url, index: tab?.index !== undefined ? tab.index + 1 : undefined, windowId: tab?.windowId });
+  } catch {
+    // The tab's window may be gone or not take new tabs (an app or popup window).
+    await chrome.tabs.create({ url });
+  }
 }

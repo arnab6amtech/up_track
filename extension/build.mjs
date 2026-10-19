@@ -16,7 +16,7 @@ const configs = [
   {
     ...common,
     format: "iife",
-    entryPoints: ["page-recorder", "relay", "popup", "editor", "offscreen"].map((n) => `${here}src/${n}.ts`),
+    entryPoints: ["page-recorder", "relay", "recording-bar", "popup", "editor", "offscreen"].map((n) => `${here}src/${n}.ts`),
   },
   // The service worker is declared as a module in the manifest.
   { ...common, format: "esm", entryPoints: [`${here}src/background.ts`] },

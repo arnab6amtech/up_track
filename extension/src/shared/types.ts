@@ -20,21 +20,46 @@ export interface Draft {
 
 export interface RecordingState {
   tabId: number;
+  /**
+   * "ready": the tab's stream is open and the page shows a Start button (the controls' floating window can only
+   * open on a click in the page). "recording": the recorder is running.
+   */
+  phase: "ready" | "recording";
+  /** When recording began; 0 while ready. */
   startedAt: number;
+  /** When the current pause began; null while recording. */
+  pausedAt: number | null;
+  /** Time spent paused before the current pause, in milliseconds. */
+  pausedMs: number;
 }
+
+/** How long a recording has run, leaving out pauses. */
+export const recordedMs = (r: RecordingState, now = Date.now()) =>
+  r.phase === "ready" ? 0 : (r.pausedAt ?? now) - r.startedAt - r.pausedMs;
 
 /** Messages the popup, offscreen document and content scripts send to the background worker. */
 export type BackgroundMessage =
   | { type: "screenshot"; tabId: number; windowId: number }
   | { type: "record-start"; tabId: number }
   | { type: "record-stop" }
+  | { type: "record-begin" }
+  | { type: "record-cancel" }
+  | { type: "record-pause" }
+  | { type: "record-resume" }
   | { type: "state" }
   | { type: "recording-done"; draftId: string }
   | { type: "recording-failed"; error: string }
   | { type: "stash-log"; log: CaptureLog };
 
 export type OffscreenMessage =
-  | { target: "offscreen"; type: "start"; streamId: string; maxMs: number }
-  | { target: "offscreen"; type: "stop" };
+  | { target: "offscreen"; type: "prepare"; streamId: string; maxMs: number }
+  | { target: "offscreen"; type: "begin" }
+  | { target: "offscreen"; type: "cancel" }
+  | { target: "offscreen"; type: "stop" }
+  | { target: "offscreen"; type: "pause" }
+  | { target: "offscreen"; type: "resume" };
+
+/** Sent to the recorded tab's toolbar. */
+export type TabMessage = { type: "recording-ended" } | { type: "recording-state"; recording: RecordingState };
 
 export const MAX_RECORDING_MS = 5 * 60 * 1000;

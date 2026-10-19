@@ -1,7 +1,7 @@
 import { ApiError, ping, SignInRequired } from "./shared/api";
 import { isRestricted } from "./shared/restricted";
 import { getSettings, normalizeServerUrl, saveSettings, signInUrl, type Settings } from "./shared/settings";
-import type { BackgroundMessage, RecordingState } from "./shared/types";
+import { recordedMs, type BackgroundMessage, type RecordingState } from "./shared/types";
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const views = { setup: $("setup"), signin: $("signin"), actions: $("actions"), recording: $("recording") };
@@ -30,8 +30,16 @@ let timer: ReturnType<typeof setInterval> | undefined;
 
 function showRecording(state: RecordingState) {
   show("recording");
+  // Ready: the page shows a Start button (it opens the controls' window, which only a click in the page can do).
+  const ready = state.phase === "ready";
+  $("rec-label").textContent = ready ? "Ready to record" : "Recording";
+  $("timer").hidden = ready;
+  $("stop").textContent = ready ? "Cancel" : "Stop and review";
+  $("rec-help").textContent = ready
+    ? "Click “Start recording” on the page. The controls open in a small window that isn't recorded."
+    : "Reproduce the bug in the tab now. The API calls it makes are recorded too.";
   const tick = () => {
-    const s = Math.floor((Date.now() - state.startedAt) / 1000);
+    const s = Math.floor(recordedMs(state) / 1000);
     $("timer").textContent = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
   };
   tick();
@@ -107,6 +115,7 @@ $("settings-form").addEventListener("submit", async (e) => {
 });
 
 $("open-settings").addEventListener("click", () => void showSetup());
+
 
 $("screenshot").addEventListener("click", async () => {
   showError("action-error", null);

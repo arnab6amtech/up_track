@@ -87,7 +87,7 @@ async function Bug({ params }: Pick<PageProps<"/o/[org]/p/[key]/bugs/[number]">,
                 [
                   ["Found in", bug.foundInVersionName],
                   ["Fixed in", bug.fixedInVersionName ?? "—"],
-                  ["Module", bug.componentName ?? "—"],
+                  ["Feature", bug.componentName ?? "—"],
                   ["Assignee", bug.assigneeName ?? "Nobody"],
                   ["Reported by", bug.reporterName],
                   ["Reported", <LocalTime key="c" iso={iso(bug.createdAt)} />],
@@ -159,7 +159,13 @@ async function Bug({ params }: Pick<PageProps<"/o/[org]/p/[key]/bugs/[number]">,
               currentUserId={ctx.user.id}
               statuses={statuses.map((s) => ({ id: s.id, name: s.name, category: s.category }))}
               versions={versions.map((v) => ({ id: v.id, name: v.name }))}
-              components={components.map((c) => ({ id: c.id, name: c.name }))}
+              components={[
+                ...components.map((c) => ({ id: c.id, name: c.name })),
+                // A removed feature can't be picked any more, but the bug still shows it.
+                ...(bug.componentId && !components.some((c) => c.id === bug.componentId)
+                  ? [{ id: bug.componentId, name: bug.componentName ?? "Removed feature" }]
+                  : []),
+              ]}
               members={members.map((m) => ({ id: m.userId, name: m.fullName }))}
               bug={{
                 statusId: bug.statusId,

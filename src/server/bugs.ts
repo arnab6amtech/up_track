@@ -449,7 +449,7 @@ const COLUMNS: Record<keyof BugChanges, { column: string; cast?: string; label: 
   priority: { column: "priority", cast: "bug_priority", label: "priority" },
   assigneeId: { column: "assignee_id", cast: "uuid", label: "assignee" },
   fixedInVersionId: { column: "fixed_in_version_id", cast: "uuid", label: "fixed in" },
-  componentId: { column: "component_id", cast: "uuid", label: "module" },
+  componentId: { column: "component_id", cast: "uuid", label: "feature" },
 };
 
 /**
@@ -554,7 +554,9 @@ export interface ActivityItem {
 export async function listActivity(orgId: string, bugId: string): Promise<ActivityItem[]> {
   return inOrg(orgId, (tx) =>
     tx.query<ActivityItem>(
-      `select a.id::int, u.full_name as "actorName", a.action, a.field, a.old_value as "oldValue", a.new_value as "newValue",
+      // Features were called modules before; older history rows say so.
+      `select a.id::int, u.full_name as "actorName", a.action,
+              case a.field when 'module' then 'feature' else a.field end as field, a.old_value as "oldValue", a.new_value as "newValue",
               a.created_at as "createdAt"
          from bug_activity a left join users u on u.id = a.actor_id
         where a.bug_id = $1 order by a.created_at desc, a.id desc limit 100`,

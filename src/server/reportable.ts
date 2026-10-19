@@ -2,7 +2,7 @@ import "server-only";
 import type { ReportableProject } from "@/lib/capture-types";
 import { inOrg } from "./db";
 
-/** Projects someone can report bugs to (bug.create), with active versions and modules, for the extension. */
+/** Projects someone can report bugs to (bug.create), with active versions and features, for the extension. */
 export async function listReportableProjects(
   org: { id: string; slug: string; name: string },
   userId: string,

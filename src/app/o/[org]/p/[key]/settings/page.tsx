@@ -109,7 +109,7 @@ async function Settings({ params }: Pick<PageProps<"/o/[org]/p/[key]/settings">,
       </Section>
 
       {canManage && (
-        <Section title="Modules" hint="Areas of the product, such as Checkout or Admin panel. Optional on each bug.">
+        <Section title="Features" hint="Areas of the product, such as Checkout or Admin panel. Every new bug names the feature it's in, so add at least one before reporting.">
           <div className="rounded-xl border border-line bg-surface p-4">
             <AddComponentForm ids={ids} />
           </div>
@@ -123,7 +123,7 @@ async function Settings({ params }: Pick<PageProps<"/o/[org]/p/[key]/settings">,
                   <ConfirmButton
                     action={archiveComponentAction}
                     fields={{ ...ids, componentId: c.id }}
-                    confirm={`Remove the module ${c.name}? Its bugs keep it; it just can't be picked any more.`}
+                    confirm={`Remove the feature ${c.name}? Its bugs keep it; it just can't be picked any more.`}
                     label="Remove"
                     pendingLabel="Removing…"
                   />

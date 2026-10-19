@@ -125,9 +125,10 @@ export function BugPanel(props: BugPanelProps) {
           ))}
         </select>
       </Row>
-      <Row label="Module">
+      <Row label="Feature">
         <select name="componentId" defaultValue={bug.componentId ?? ""} disabled={!can.edit} className={small}>
-          <option value="">None</option>
+          {/* Only older bugs can be without a feature; once set, it can be changed but not cleared. */}
+          {!bug.componentId && <option value="">None</option>}
           {props.components.map((c) => (
             <option key={c.id} value={c.id}>
               {c.name}

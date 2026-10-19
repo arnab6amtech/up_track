@@ -39,19 +39,28 @@ function fillSelect(id: string, options: { value: string; label: string }[], sel
 let projects: ReportableProject[] = [];
 const LAST_CHOICE = "lastReportTarget";
 
-function showVersions(projectId: string, preferredVersionId?: string) {
+function showVersions(projectId: string, preferred: { versionId?: string; componentId?: string } = {}) {
   const project = projects.find((p) => p.id === projectId);
   const versions = project?.versions ?? [];
   // Default to what the reporter used last, else whatever QA is testing now.
-  const pick = versions.find((v) => v.id === preferredVersionId) ?? versions.find((v) => v.status === "in_testing") ?? versions[0];
+  const pick = versions.find((v) => v.id === preferred.versionId) ?? versions.find((v) => v.status === "in_testing") ?? versions[0];
   fillSelect(
     "version",
     versions.map((v) => ({ value: v.id, label: `${v.name}${v.status === "in_testing" ? " (in testing)" : ""}` })),
     pick?.id ?? "",
   );
-  const modules = project?.components ?? [];
-  $("module-field").hidden = modules.length === 0;
-  fillSelect("module", [{ value: "", label: "None" }, ...modules.map((c) => ({ value: c.id, label: c.name }))], "");
+  // Every bug names its feature; a project without any can't take reports yet.
+  const features = project?.components ?? [];
+  const select = $<HTMLSelectElement>("module");
+  const placeholder = new Option(features.length ? "Choose a feature" : "No features yet", "", true, true);
+  placeholder.disabled = true;
+  const remembered = features.some((c) => c.id === preferred.componentId) ? preferred.componentId! : "";
+  select.replaceChildren(placeholder, ...features.map((c) => new Option(c.name, c.id, false, c.id === remembered)));
+  const missing = $("feature-missing");
+  missing.textContent = project
+    ? `${project.name} has no features yet, and every bug names one. Ask a project manager to add them in the project's settings.`
+    : "";
+  missing.hidden = !project || features.length > 0;
 }
 
 /** Projects in a picker, grouped by organization when the reporter belongs to several. */
@@ -102,10 +111,10 @@ async function loadProjects() {
   $("projects-error").hidden = true;
   $<HTMLButtonElement>("submit").disabled = !$("load-error").hidden;
   projectsReady = true;
-  const last = ((await chrome.storage.local.get(LAST_CHOICE))[LAST_CHOICE] ?? {}) as { projectId?: string; versionId?: string };
+  const last = ((await chrome.storage.local.get(LAST_CHOICE))[LAST_CHOICE] ?? {}) as { projectId?: string; versionId?: string; componentId?: string };
   const projectId = projects.some((p) => p.id === last.projectId) ? last.projectId! : projects[0].id;
   fillProjects(projectId);
-  showVersions(projectId, last.versionId);
+  showVersions(projectId, last);
 }
 
 $<HTMLSelectElement>("project").addEventListener("change", (e) => showVersions((e.target as HTMLSelectElement).value));
@@ -400,7 +409,7 @@ $("form").addEventListener("submit", async (e) => {
       description: $<HTMLTextAreaElement>("description").value.trim(),
       projectId: $<HTMLSelectElement>("project").value,
       versionId: $<HTMLSelectElement>("version").value,
-      componentId: $<HTMLSelectElement>("module").value || undefined,
+      componentId: $<HTMLSelectElement>("module").value,
       severity: $<HTMLSelectElement>("severity").value,
       priority: $<HTMLSelectElement>("priority").value,
       // Page details can be missing when the tab closed before a recording finished.
@@ -431,7 +440,7 @@ $("form").addEventListener("submit", async (e) => {
     const result = await upload(settings, form, (f) => ($("progress-bar").style.width = `${Math.round(f * 100)}%`));
     submitted = true;
     await deleteDraft(draft.id).catch(() => {});
-    await chrome.storage.local.set({ [LAST_CHOICE]: { projectId: meta.projectId, versionId: meta.versionId } });
+    await chrome.storage.local.set({ [LAST_CHOICE]: { projectId: meta.projectId, versionId: meta.versionId, componentId: meta.componentId } });
 
     $("form").hidden = true;
     $("done").hidden = false;

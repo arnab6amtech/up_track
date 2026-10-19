@@ -50,9 +50,11 @@ export function ReportBugForm({
             ))}
           </select>
         </Field>
-        <Field label="Module" htmlFor="componentId">
-          <select id="componentId" name="componentId" defaultValue="" className={selectClass}>
-            <option value="">None</option>
+        <Field label="Feature" htmlFor="componentId" hint="The part of the product the bug is in.">
+          <select id="componentId" name="componentId" required defaultValue="" className={selectClass}>
+            <option value="" disabled>
+              Choose a feature
+            </option>
             {components.map((c) => (
               <option key={c.id} value={c.id}>
                 {c.name}

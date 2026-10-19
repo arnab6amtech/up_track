@@ -137,7 +137,7 @@ export async function setVersionStatus(orgId: string, projectId: string, version
   );
 }
 
-// ---- Components (modules) ----
+// ---- Components (features) ----
 
 export interface Component {
   id: string;
@@ -170,7 +170,7 @@ export async function createComponent(orgId: string, projectId: string, name: st
       return row!.id;
     });
   } catch (err) {
-    if (isUniqueViolation(err)) throw new UserError("There's already a module with that name.");
+    if (isUniqueViolation(err)) throw new UserError("There's already a feature with that name.");
     throw err;
   }
 }

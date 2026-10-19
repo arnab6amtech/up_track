@@ -72,9 +72,9 @@
               <label for="version">Found in version</label>
               <select id="version" class="input" required></select>
             </div>
-            <div class="field" id="module-field" hidden>
-              <label for="module">Module</label>
-              <select id="module" class="input"></select>
+            <div class="field">
+              <label for="module">Feature</label>
+              <select id="module" class="input" required></select>
             </div>
             <div class="field">
               <label for="severity">Severity</label>
@@ -86,6 +86,7 @@
             </div>
           </div>
           <p id="projects-error" class="notice" hidden></p>
+          <p id="feature-missing" class="notice" hidden></p>
           <div class="form-foot">
             <label class="check small"><input type="checkbox" id="attach-log" checked /> Attach API calls and console log</label>
             <span class="small muted" id="log-summary"></span>

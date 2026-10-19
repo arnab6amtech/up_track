@@ -105,8 +105,8 @@ export function AddComponentForm({ ids }: { ids: Ids }) {
     <form key={state.success} action={action} className="space-y-2">
       <Hidden {...ids} />
       <div className="flex gap-2">
-        <input name="name" required maxLength={100} placeholder="Checkout" aria-label="Module name" className={inputClass} />
-        <SubmitButton pendingText="Adding…">Add module</SubmitButton>
+        <input name="name" required maxLength={100} placeholder="Checkout" aria-label="Feature name" className={inputClass} />
+        <SubmitButton pendingText="Adding…">Add feature</SubmitButton>
       </div>
       <FormMessage error={state.error} />
     </form>

@@ -30,6 +30,7 @@ async function Content({ params }: Pick<PageProps<"/o/[org]/p/[key]/bugs/new">, 
   // Most bugs are found in whatever QA is testing right now.
   const defaultVersion = usable.find((v) => v.status === "in_testing") ?? usable[0];
   const base = `/o/${org}/p/${access.project.key}`;
+  const canManage = access.permissions.has(usable.length === 0 ? "project.manage_versions" : "project.manage");
 
   return (
     <>
@@ -42,10 +43,22 @@ async function Content({ params }: Pick<PageProps<"/o/[org]/p/[key]/bugs/new">, 
           Reporting from a web page? The browser extension adds an annotated screenshot or recording and the page&apos;s API log for you.
         </p>
       </div>
-      {usable.length === 0 ? (
-        <p className="rounded-xl border border-dashed border-line px-6 py-10 text-center text-sm text-muted">
-          This project has no active versions. Add one in the project settings first.
-        </p>
+      {usable.length === 0 || components.length === 0 ? (
+        <div className="rounded-xl border border-dashed border-line px-6 py-10 text-center text-sm text-muted">
+          <p className="font-medium text-foreground">{usable.length === 0 ? "Add a version first" : "Add a feature first"}</p>
+          <p className="mt-1">
+            {usable.length === 0
+              ? "Every bug is reported against an active version of the project."
+              : "Every bug names the feature it's in, such as Checkout or Admin panel."}
+          </p>
+          {canManage ? (
+            <Link href={`${base}/settings`} className="mt-4 inline-block rounded-md bg-accent px-4 py-2 font-medium text-white hover:bg-neutral-800">
+              Open project settings
+            </Link>
+          ) : (
+            <p className="mt-1">Ask a project manager to add one in the project settings.</p>
+          )}
+        </div>
       ) : (
         <div className="rounded-xl border border-line bg-surface p-5">
           <ReportBugForm

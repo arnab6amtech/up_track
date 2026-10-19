@@ -131,7 +131,7 @@ export async function POST(request: Request) {
     return fail(400, "Bug details aren't valid JSON.");
   }
 
-  // The project must be one this person may report to, and the version/module must belong to it.
+  // The project must be one this person may report to, and the version and feature must belong to it.
   let found: { org: (typeof reporter.orgs)[number]; project: ReportableProject } | undefined;
   for (const org of reporter.orgs) {
     const project = (await listReportableProjects(org, reporter.userId, org.isAdmin)).find((p) => p.id === meta.projectId);
@@ -143,7 +143,11 @@ export async function POST(request: Request) {
   if (!found) return fail(403, "You can't report bugs to that project.");
   const { org, project } = found;
   if (!project.versions.some((v) => v.id === meta.versionId)) return fail(400, "That version isn't an active version of the project.");
-  if (meta.componentId && !project.components.some((c) => c.id === meta.componentId)) return fail(400, "That module isn't part of the project.");
+  if (project.components.length === 0) {
+    return fail(400, `${project.name} has no features yet. Ask a project manager to add them in the project's settings.`);
+  }
+  if (!meta.componentId) return fail(400, "Pick the feature this bug is in.");
+  if (!project.components.some((c) => c.id === meta.componentId)) return fail(400, "That feature isn't part of the project.");
 
   const media = form.get("media");
   if (!(media instanceof File) || media.size === 0) return fail(400, "The screenshot or recording is missing.");

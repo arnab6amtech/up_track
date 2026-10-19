@@ -9,6 +9,7 @@ const views = { setup: $("setup"), signin: $("signin"), actions: $("actions"), r
 function show(view: keyof typeof views) {
   for (const [name, el] of Object.entries(views)) el.hidden = name !== view;
   $("open-settings").hidden = view !== "actions" && view !== "signin";
+  $("open-home").hidden = view !== "actions" && view !== "signin";
 }
 
 function showError(id: string, message: string | null) {
@@ -116,6 +117,14 @@ $("settings-form").addEventListener("submit", async (e) => {
 
 $("open-settings").addEventListener("click", () => void showSetup());
 
+// Home: the bug list of the project last reported to, else UpTrack's start page (it picks the organization).
+$("open-home").addEventListener("click", async () => {
+  const settings = await getSettings();
+  if (!settings) return;
+  const last = (await chrome.storage.local.get("lastReportTarget")).lastReportTarget as { listPath?: string } | undefined;
+  await chrome.tabs.create({ url: `${settings.serverUrl}${last?.listPath ?? "/"}` });
+  window.close();
+});
 
 $("screenshot").addEventListener("click", async () => {
   showError("action-error", null);

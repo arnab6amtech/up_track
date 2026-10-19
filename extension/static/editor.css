@@ -904,44 +904,106 @@ body.resizing .devtools {
   opacity: 0.45;
 }
 
-/* ---- Marked moments in the form ---- */
+/* ---- Timestamps: a collapsible row under the recording, with a tab per timestamp ---- */
 
-.markers {
-  display: grid;
-  gap: 4px;
+.stamps {
+  flex: none;
+  background: var(--bg);
+  border-top: 1px solid var(--line);
 }
 
-.markers-title {
-  margin: 0;
-  font-size: 12px;
-  font-weight: 600;
-}
-
-#marker-list {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  display: grid;
-  gap: 4px;
-  max-height: 96px;
-  overflow: auto;
-}
-
-.marker {
+.stamps-toggle {
   display: flex;
   align-items: center;
-  gap: 6px;
+  justify-content: space-between;
+  width: 100%;
+  border: 0;
+  background: none;
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
 }
 
-.marker-time {
+.stamps-toggle:hover {
+  background: var(--surface-2);
+}
+
+.stamps-toggle .count {
+  margin-left: 2px;
+  font-weight: 400;
+  color: var(--muted);
+}
+
+.stamps-arrow {
+  width: 16px;
+  height: 16px;
+  color: var(--muted);
+  transition: transform 0.15s;
+}
+
+.stamps-toggle[aria-expanded="true"] .stamps-arrow {
+  transform: rotate(180deg);
+}
+
+.stamps-body {
+  padding: 0 14px 10px;
+}
+
+.stamps-tabs {
+  display: flex;
+  border-bottom: 1px solid var(--line);
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+
+.stamps-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.stamp-tab {
   flex: none;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-variant-numeric: tabular-nums;
   border: 0;
-  border-radius: 5px;
-  padding: 3px 7px;
-  background: #fbbf24;
-  color: #111;
-  font: 600 12px ui-monospace, SFMono-Regular, Menlo, monospace;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  background: none;
+  padding: 6px 8px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--muted);
+  white-space: nowrap;
   cursor: pointer;
+}
+
+.stamp-tab:hover {
+  color: var(--fg);
+}
+
+.stamp-tab[aria-selected="true"] {
+  border-bottom-color: var(--accent);
+  color: var(--fg);
+}
+
+.stamp-tab.outside {
+  opacity: 0.45;
+}
+
+.stamps-panel {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-top: 8px;
+}
+
+.stamps-panel.outside .marker-note {
+  opacity: 0.45;
+}
+
+.stamps-hint {
+  margin: 8px 0 0;
 }
 
 .marker-note {
@@ -976,7 +1038,6 @@ body.resizing .devtools {
   background: var(--surface-2);
 }
 
-.trim-pin.outside,
-.marker.outside {
+.trim-pin.outside {
   opacity: 0.4;
 }

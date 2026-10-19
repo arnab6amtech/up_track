@@ -128,7 +128,7 @@ async function setUp() {
     let count = controls.mark.querySelector<HTMLElement>(".count");
     if (marks && !count) count = controls.mark.appendChild(Object.assign(document.createElement("span"), { className: "count" }));
     if (count) count.textContent = String(marks);
-    controls.mark.setAttribute("aria-label", marks ? `Mark this moment (${marks} marked)` : "Mark this moment");
+    controls.mark.setAttribute("aria-label", marks ? `Add a timestamp (${marks} added)` : "Add a timestamp");
   };
   const ticker = setInterval(() => {
     if (!connected()) return teardown();
@@ -157,7 +157,7 @@ async function setUp() {
       <button class="stop" title="Stop and review" aria-label="Stop recording">${ICONS.stop}</button>
       <button class="pause" title="Pause" aria-label="Pause recording">${ICONS.pause}</button>
       <span class="time" aria-live="off">0:00</span>
-      <button class="mark" title="Mark this moment: where the bug shows up" aria-label="Mark this moment">${ICONS.mark}</button>
+      <button class="mark" title="Add a timestamp: where the bug shows up" aria-label="Add a timestamp">${ICONS.mark}</button>
       <span class="sep"></span>
       <button class="tool" data-tool="pen" title="Draw on the page" aria-pressed="false" aria-label="Pen">${ICONS.pen}</button>
       <button class="tool" data-tool="blur" title="Blur part of the page: drag over it. Click a blur to remove it." aria-pressed="false" aria-label="Blur">${ICONS.blur}</button>

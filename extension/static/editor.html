@@ -49,7 +49,7 @@
                   <svg class="icon-play" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" aria-hidden="true"><path d="M6 4.2v11.6L15.5 10 6 4.2Z" /></svg>
                   <svg class="icon-pause" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><rect x="5.5" y="4.5" width="3" height="11" rx="1" /><rect x="11.5" y="4.5" width="3" height="11" rx="1" /></svg>
                 </button>
-                <button type="button" class="trim-play" id="trim-mark" title="Mark this moment: where the bug shows up (M)" aria-label="Mark this moment">
+                <button type="button" class="trim-play" id="trim-mark" title="Add a timestamp: where the bug shows up (M)" aria-label="Add a timestamp">
                   <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 17.5V3" /><path d="M5 3.5h9.5l-2 3.5 2 3.5H5" /></svg>
                 </button>
                 <div class="trim-track" id="trim-track">
@@ -66,6 +66,18 @@
             </div>
             <p id="load-error" class="notice" hidden></p>
           </div>
+
+          <!-- Recordings: the timestamps marked in them, in a collapsible row with a tab for each. -->
+          <div id="stamps" class="stamps" hidden>
+            <button type="button" class="stamps-toggle" id="stamps-toggle" aria-expanded="false" aria-controls="stamps-body">
+              <span>Timestamp <span class="count" id="count-timestamps"></span></span>
+              <svg class="stamps-arrow" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M5.22 8.22a.75.75 0 0 1 1.06 0L10 11.94l3.72-3.72a.75.75 0 1 1 1.06 1.06l-4.25 4.25a.75.75 0 0 1-1.06 0L5.22 9.28a.75.75 0 0 1 0-1.06Z" clip-rule="evenodd" /></svg>
+            </button>
+            <div class="stamps-body" id="stamps-body" hidden>
+              <div class="stamps-tabs" id="stamps-tabs" role="tablist" aria-label="Timestamps"></div>
+              <div class="stamps-panel" id="stamps-panel" role="tabpanel"></div>
+            </div>
+          </div>
         </div>
 
         <form id="form" class="report-form">
@@ -77,10 +89,6 @@
             placeholder="Steps to reproduce, what you expected, what happened"
             aria-label="Description"
           ></textarea>
-          <div class="markers" id="markers" hidden>
-            <p class="markers-title">Marked moments <span class="muted">· where the bug shows up</span></p>
-            <ul id="marker-list"></ul>
-          </div>
           <div class="fields">
             <div class="field">
               <label for="project">Project</label>
@@ -155,9 +163,9 @@
 
       <aside class="devtools" aria-label="Captured from the page">
         <div class="tabs" role="tablist">
-          <button type="button" role="tab" class="tab" data-tab="page" aria-selected="true">Captured page</button>
+          <button type="button" role="tab" class="tab" data-tab="page" aria-selected="true" title="The page the bug was captured on">Page</button>
           <button type="button" role="tab" class="tab" data-tab="network" aria-selected="false">Network <span class="count" id="count-network"></span></button>
-          <button type="button" role="tab" class="tab" data-tab="console" aria-selected="false">Console log <span class="count" id="count-console"></span></button>
+          <button type="button" role="tab" class="tab" data-tab="console" aria-selected="false">Console <span class="count" id="count-console"></span></button>
         </div>
         <div class="tab-body" id="tab-page" role="tabpanel">
           <dl class="details" id="page-details"></dl>

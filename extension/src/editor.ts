@@ -25,6 +25,8 @@ let annotator: Annotator | null = null;
 let trim = { start: 0, end: 0 };
 /** Moments marked in a recording ("the bug happens here"), in milliseconds, with an optional note. */
 let markers: { atMs: number; label: string }[] = [];
+/** The timestamp whose tab is open. */
+let activeStamp = 0;
 let submitted = false;
 
 function fail(message: string) {
@@ -250,13 +252,14 @@ function setUpVideo() {
     startHandle.style.left = at(s);
     endHandle.style.left = `calc(${at(e)} - ${HANDLE_PX}px)`;
     $("trim-playhead").style.left = at(share(video.currentTime * 1000));
-    // Moments outside the trimmed part aren't sent; say so on their pins and rows.
+    // Timestamps outside the trimmed part aren't sent; say so on their pins and tabs.
     markers.forEach((m, i) => {
       const outside = m.atMs < trim.start || m.atMs > trim.end;
       $("trim-marks").children[i]?.classList.toggle("outside", outside);
-      const row = $("marker-list").children[i];
-      row?.classList.toggle("outside", outside);
-      row?.setAttribute("title", outside ? "Outside the trimmed part, so it won't be sent" : "");
+      const tab = $("stamps-tabs").children[i];
+      tab?.classList.toggle("outside", outside);
+      tab?.setAttribute("title", outside ? "Outside the trimmed part, so it won't be sent" : m.label || "Show this moment");
+      if (i === activeStamp) $("stamps-panel").classList.toggle("outside", outside);
     });
     for (const [handle, ms] of [
       [startHandle, trim.start],
@@ -369,68 +372,93 @@ function setUpVideo() {
   }
   window.addEventListener("resize", layout);
 
-  // ---- Marked moments: pins on the timeline and a list with notes in the form ----
+  // ---- Timestamps: pins on the timeline, and a collapsible row under the recording with a tab for each ----
 
   markers = (draft.markers ?? []).map((m) => ({ atMs: m.atMs, label: m.label ?? "" }));
+  $("stamps").hidden = false;
   const seek = (ms: number) => {
     video.pause();
     video.currentTime = Math.min(Math.max(ms, 0), duration()) / 1000;
     layout();
   };
-  const renderMarkers = () => {
+  const setOpen = (open: boolean) => {
+    $("stamps-toggle").setAttribute("aria-expanded", String(open));
+    $("stamps-body").hidden = !open;
+  };
+  $("stamps-toggle").addEventListener("click", () => setOpen($("stamps-body").hidden));
+
+  /** Opens the row on one timestamp and shows that moment in the recording. */
+  const select = (i: number, focusNote = false) => {
+    activeStamp = i;
+    setOpen(true);
+    renderStamps();
+    if (markers[i]) seek(markers[i].atMs);
+    if (focusNote) $("stamps-panel").querySelector("input")?.focus();
+  };
+
+  const renderStamps = () => {
     markers.sort((a, b) => a.atMs - b.atMs);
+    activeStamp = Math.min(activeStamp, Math.max(markers.length - 1, 0));
+    $("count-timestamps").textContent = markers.length ? String(markers.length) : "";
     $("trim-marks").replaceChildren(
-      ...markers.map((m) => {
+      ...markers.map((m, i) => {
         const pin = el("button", "trim-pin");
         pin.type = "button";
         pin.style.left = at(share(m.atMs));
         pin.title = `${formatTime(m.atMs)}${m.label ? ` · ${m.label}` : ""}`;
-        pin.setAttribute("aria-label", `Marked moment at ${formatTime(m.atMs)}`);
+        pin.setAttribute("aria-label", `Timestamp at ${formatTime(m.atMs)}`);
         pin.addEventListener("pointerdown", (e) => e.stopPropagation());
-        pin.addEventListener("click", () => seek(m.atMs));
+        pin.addEventListener("click", () => select(i));
         return pin;
       }),
     );
-    $("markers").hidden = markers.length === 0;
-    $("marker-list").replaceChildren(
-      ...markers.map((m) => {
-        const item = el("li", "marker");
-        const time = el("button", "marker-time", formatTime(m.atMs));
-        time.type = "button";
-        time.title = "Show this moment";
-        time.addEventListener("click", () => seek(m.atMs));
-        const note = el("input", "marker-note");
-        note.value = m.label;
-        note.maxLength = 200;
-        note.placeholder = "What happens here? (optional)";
-        note.setAttribute("aria-label", `Note for the moment at ${formatTime(m.atMs)}`);
-        note.addEventListener("input", () => (m.label = note.value));
-        const remove = el("button", "marker-remove", "×");
-        remove.type = "button";
-        remove.title = "Remove this moment";
-        remove.setAttribute("aria-label", `Remove the moment at ${formatTime(m.atMs)}`);
-        remove.addEventListener("click", () => {
-          markers.splice(markers.indexOf(m), 1);
-          showMarkers();
-        });
-        item.append(time, note, remove);
-        return item;
+    $("stamps-tabs").replaceChildren(
+      ...markers.map((m, i) => {
+        const tab = el("button", "stamp-tab", formatTime(m.atMs));
+        tab.type = "button";
+        tab.setAttribute("role", "tab");
+        tab.setAttribute("aria-selected", String(i === activeStamp));
+        tab.addEventListener("click", () => select(i));
+        return tab;
       }),
     );
+    const m = markers[activeStamp];
+    if (!m) {
+      $("stamps-panel").replaceChildren(el("p", "small muted stamps-hint", "Where the bug shows up: press the flag on the timeline (or M) at that moment."));
+    } else {
+      const note = el("input", "marker-note");
+      note.value = m.label;
+      note.maxLength = 200;
+      note.placeholder = "What happens here? (optional)";
+      note.setAttribute("aria-label", `Note for the timestamp at ${formatTime(m.atMs)}`);
+      note.addEventListener("input", () => (m.label = note.value));
+      const remove = el("button", "marker-remove", "×");
+      remove.type = "button";
+      remove.title = "Remove this timestamp";
+      remove.setAttribute("aria-label", `Remove the timestamp at ${formatTime(m.atMs)}`);
+      remove.addEventListener("click", () => {
+        markers.splice(markers.indexOf(m), 1);
+        showMarkers();
+      });
+      $("stamps-panel").replaceChildren(note, remove);
+    }
   };
-  const addMarker = () => {
-    const atMs = Math.round(video.currentTime * 1000);
-    if (markers.some((m) => Math.abs(m.atMs - atMs) < 250)) return;
-    const added = { atMs, label: "" };
-    markers.push(added);
-    showMarkers();
-    $("marker-list").children[markers.indexOf(added)]?.querySelector("input")?.focus();
-  };
-  $("trim-mark").addEventListener("click", addMarker);
   const showMarkers = () => {
-    renderMarkers();
+    renderStamps();
     layout();
   };
+
+  const addMarker = () => {
+    const atMs = Math.round(video.currentTime * 1000);
+    const near = markers.findIndex((m) => Math.abs(m.atMs - atMs) < 250);
+    if (near >= 0) return select(near, true);
+    const added = { atMs, label: "" };
+    markers.push(added);
+    markers.sort((a, b) => a.atMs - b.atMs);
+    select(markers.indexOf(added), true);
+    layout();
+  };
+  $("trim-mark").addEventListener("click", addMarker);
   // M marks the moment on screen, unless typing.
   document.addEventListener("keydown", (e) => {
     if (e.key.toLowerCase() !== "m" || e.metaKey || e.ctrlKey || e.altKey) return;
@@ -943,6 +971,7 @@ $("form").addEventListener("submit", async (e) => {
     // It's uploaded: editing the capture any further would change nothing.
     $("tools").hidden = true;
     $("trim").hidden = true;
+    $("stamps").hidden = true;
     $("done-sub").textContent = `Added to UpTrack as ${result.key}.`;
     $<HTMLInputElement>("share").value = result.shareUrl;
     $<HTMLInputElement>("fix").value = result.fixCommand;

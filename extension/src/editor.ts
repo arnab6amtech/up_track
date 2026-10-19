@@ -4,7 +4,7 @@ import { Annotator, type Tool } from "./annotate";
 import { ApiError, fetchProjects, SignInRequired, upload } from "./shared/api";
 import { deleteDraft, getDraft } from "./shared/drafts";
 import { getSettings, signInUrl } from "./shared/settings";
-import { isFailed, PRIORITIES, SEVERITIES, type CaptureLog, type Draft, type ReportableProject } from "./shared/types";
+import { describeUserAgent, isFailed, PRIORITIES, SEVERITIES, type CaptureLog, type Draft, type PageInfo, type ReportableProject } from "./shared/types";
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const COLORS = ["#e11d48", "#f97316", "#facc15", "#16a34a", "#2563eb", "#0a0a0a"];
@@ -114,6 +114,26 @@ document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible" && !projectsReady) void loadProjects();
 });
 
+// ---- Fitting the capture on screen ----
+
+/** Keeps the screenshot or recording as large as the stage allows, whole and undistorted. */
+function fitToStage(media: HTMLElement, width: number, height: number) {
+  const stage = $("stage");
+  const fit = () => {
+    const style = getComputedStyle(stage);
+    const room = {
+      width: stage.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight),
+      height: stage.clientHeight - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom),
+    };
+    // 2px for the border.
+    const scale = Math.max(0, Math.min((room.width - 2) / width, (room.height - 2) / height));
+    media.style.width = `${Math.floor(width * scale)}px`;
+    media.style.height = `${Math.floor(height * scale)}px`;
+  };
+  new ResizeObserver(fit).observe(stage);
+  fit();
+}
+
 // ---- Screenshot annotation ----
 
 async function setUpImage() {
@@ -122,6 +142,7 @@ async function setUpImage() {
   $("canvas-wrap").hidden = false;
   const a = new Annotator($<HTMLCanvasElement>("canvas"), bitmap, $<HTMLTextAreaElement>("text-input"));
   annotator = a;
+  fitToStage($("canvas"), bitmap.width, bitmap.height);
 
   const undo = $<HTMLButtonElement>("undo");
   const clear = $<HTMLButtonElement>("clear");
@@ -168,12 +189,14 @@ async function setUpImage() {
 // ---- Recording trim ----
 
 function setUpVideo() {
-  $("video-wrap").hidden = false;
   const video = $<HTMLVideoElement>("video");
+  video.hidden = false;
+  $("trim").hidden = false;
   video.src = URL.createObjectURL(draft.blob);
   const duration = () => (Number.isFinite(video.duration) ? video.duration * 1000 : (draft.durationMs ?? 0));
   const label = () => ($("trim-label").textContent = `${formatTime(trim.start)} to ${formatTime(trim.end)}`);
   video.addEventListener("loadedmetadata", () => {
+    if (video.videoWidth && video.videoHeight) fitToStage(video, video.videoWidth, video.videoHeight);
     trim = { start: 0, end: duration() };
     label();
   });
@@ -191,25 +214,162 @@ function setUpVideo() {
   });
 }
 
-// ---- Log summary ----
+// ---- What was captured from the page ----
 
-function showLog(log: CaptureLog) {
-  const failed = log.network.filter(isFailed);
+/** An element with text; page data is untrusted, so it's only ever set as text. */
+function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, text?: string): HTMLElementTagNameMap[K] {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (text !== undefined) node.textContent = text;
+  return node;
+}
+
+const clock = (ms: number) => new Date(ms).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+
+function showSummary(log: CaptureLog) {
+  const failed = log.network.filter(isFailed).length;
   const errors = log.console.filter((c) => c.level === "error").length;
   $("log-summary").textContent =
-    `${log.network.length} API ${log.network.length === 1 ? "call" : "calls"}, ${failed.length} failed · ` +
+    `${log.network.length} API ${log.network.length === 1 ? "call" : "calls"}, ${failed} failed · ` +
     `${errors} console ${errors === 1 ? "error" : "errors"} · page and browser details`;
-  const list = $("failed-list");
-  for (const e of failed.slice(-5)) {
-    const li = document.createElement("li");
-    const status = document.createElement("span");
-    status.className = "status-fail";
-    status.textContent = String(e.status || "ERR");
-    li.append(status, ` ${e.method} ${e.url.replace(/^https?:\/\/[^/]+/, "")}`);
-    li.title = e.url;
-    list.append(li);
-  }
   $("log-missing").hidden = draft.logAvailable;
+}
+
+function showPage(page: PageInfo | null) {
+  const list = $("page-details");
+  if (!page) {
+    list.replaceWith(el("p", "small muted", "The page's details weren't available (the tab closed before the recording finished)."));
+    return;
+  }
+  const rows: [string, string | HTMLElement][] = [];
+  if (/^https?:/.test(page.url)) {
+    const link = el("a", undefined, page.url);
+    link.href = page.url;
+    link.target = "_blank";
+    link.rel = "noreferrer";
+    rows.push(["Page", link]);
+  } else {
+    rows.push(["Page", page.url]);
+  }
+  if (page.title) rows.push(["Title", page.title]);
+  rows.push(["Browser", describeUserAgent(page.userAgent)]);
+  rows.push(["Window", `${page.viewport.width} × ${page.viewport.height} at ${page.devicePixelRatio}x`]);
+  if (page.screen) rows.push(["Screen", `${page.screen.width} × ${page.screen.height}`]);
+  rows.push(["Language", page.language]);
+  rows.push(["Time zone", page.timezone]);
+  for (const [label, value] of rows) {
+    const dd = el("dd");
+    dd.append(value);
+    list.append(el("dt", undefined, label), dd);
+  }
+}
+
+function codeBlock(title: string, text: string) {
+  const box = el("div");
+  box.append(el("p", undefined, title), el("pre", "mono", text));
+  return box;
+}
+
+const headerText = (headers: Record<string, string>) => Object.entries(headers).map(([k, v]) => `${k}: ${v}`).join("\n");
+
+function showNetwork(log: CaptureLog) {
+  const failed = log.network.filter(isFailed).length;
+  const count = $("count-network");
+  count.replaceChildren(String(log.network.length));
+  if (failed) count.append(" · ", el("span", "status-fail", `${failed} failed`));
+
+  const render = () => {
+    const failedOnly = $<HTMLInputElement>("failed-only").checked;
+    const query = $<HTMLInputElement>("network-filter").value.trim().toLowerCase();
+    const calls = log.network.filter((e) => (!failedOnly || isFailed(e)) && (!query || e.url.toLowerCase().includes(query)));
+    const list = $("network-list");
+    list.replaceChildren(
+      ...calls.map((e) => {
+        const item = el("li");
+        const details = el("details", "entry net");
+        const summary = el("summary");
+        let path = e.url;
+        try {
+          const u = new URL(e.url);
+          path = u.pathname + u.search;
+        } catch {}
+        summary.append(
+          el("span", `mono ${isFailed(e) ? "status-fail" : "status-ok"}`, String(e.status || "ERR")),
+          el("span", "mono", e.method),
+          Object.assign(el("span", "mono path", path), { title: e.url }),
+          el("span", "muted", `${Math.round(e.durationMs)} ms`),
+        );
+        const body = el("div", "entry-body");
+        body.append(codeBlock("URL", e.url));
+        if (e.error) body.append(codeBlock("Error", e.error));
+        if (e.requestHeaders && Object.keys(e.requestHeaders).length) body.append(codeBlock("Request headers", headerText(e.requestHeaders)));
+        if (e.requestBody) body.append(codeBlock("Request body", e.requestBody));
+        if (e.responseHeaders && Object.keys(e.responseHeaders).length) body.append(codeBlock("Response headers", headerText(e.responseHeaders)));
+        if (e.responseBody) body.append(codeBlock("Response body", e.responseBody));
+        details.append(summary, body);
+        item.append(details);
+        return item;
+      }),
+    );
+    const empty = $("network-empty");
+    empty.textContent = !draft.logAvailable
+      ? "No API calls were recorded: the page was open before the extension was installed. Reload it and reproduce the bug."
+      : query && log.network.length
+        ? "No calls match that filter."
+        : failedOnly && log.network.length
+          ? "No failed calls."
+        : "The page made no API calls.";
+    empty.hidden = calls.length > 0;
+  };
+  $("failed-only").addEventListener("change", render);
+  $("network-filter").addEventListener("input", render);
+  render();
+}
+
+function showConsole(log: CaptureLog) {
+  const errors = log.console.filter((c) => c.level === "error").length;
+  const count = $("count-console");
+  count.replaceChildren(String(log.console.length));
+  if (errors) count.append(" · ", el("span", "status-fail", `${errors} ${errors === 1 ? "error" : "errors"}`));
+  $("console-list").replaceChildren(
+    ...log.console.map((c) => {
+      const item = el("li", "entry console-entry");
+      const head = el("div", "console-head");
+      const source = c.source === "exception" ? "Uncaught exception" : c.source === "rejection" ? "Unhandled promise rejection" : `console.${c.level}`;
+      head.append(el("span", `level level-${c.level}`, c.level === "error" ? "Error" : "Warning"), el("span", "muted", `${source} · ${clock(c.at)}`));
+      item.append(head, el("p", "mono message", c.message));
+      if (c.stack) {
+        const stack = el("details");
+        stack.append(el("summary", "small", "Stack trace"), el("pre", "mono", c.stack));
+        item.append(stack);
+      }
+      return item;
+    }),
+  );
+  const empty = $("console-empty");
+  empty.textContent = draft.logAvailable ? "No console errors or warnings." : "Nothing was recorded: the page was open before the extension was installed.";
+  empty.hidden = log.console.length > 0;
+}
+
+function setUpTabs() {
+  const tabs = [...document.querySelectorAll<HTMLButtonElement>(".tab")];
+  for (const tab of tabs) {
+    tab.addEventListener("click", () => {
+      for (const t of tabs) {
+        const selected = t === tab;
+        t.setAttribute("aria-selected", String(selected));
+        $(`tab-${t.dataset.tab}`).hidden = !selected;
+      }
+    });
+  }
+}
+
+function showLog(log: CaptureLog) {
+  showSummary(log);
+  showPage(draft.page);
+  showNetwork(log);
+  showConsole(log);
+  setUpTabs();
 }
 
 // ---- Submit ----
@@ -275,6 +435,11 @@ $("form").addEventListener("submit", async (e) => {
 
     $("form").hidden = true;
     $("done").hidden = false;
+    button.hidden = true;
+    progress.hidden = true;
+    // It's uploaded: editing the capture any further would change nothing.
+    $("tools").hidden = true;
+    $("trim").hidden = true;
     $("done-sub").textContent = `Added to UpTrack as ${result.key}.`;
     $<HTMLInputElement>("share").value = result.shareUrl;
     $<HTMLInputElement>("fix").value = result.fixCommand;

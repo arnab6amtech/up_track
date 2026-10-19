@@ -822,23 +822,33 @@ body.resizing .devtools {
   opacity: 0.4;
 }
 
-/* ---- Request type chips (as in DevTools) ---- */
+/* ---- Request types (as in DevTools): one row of tabs, scrolling sideways when the panel is narrow ---- */
 
 .chips {
   display: flex;
-  flex-wrap: wrap;
-  gap: 2px 4px;
-  margin-bottom: 8px;
+  margin: 0 -14px 10px;
+  padding: 0 8px;
+  border-bottom: 1px solid var(--line);
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+
+.chips::-webkit-scrollbar {
+  display: none;
 }
 
 .chip {
-  border: 1px solid transparent;
-  border-radius: 4px;
+  flex: none;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
   background: none;
-  padding: 2px 7px;
-  font-size: 11.5px;
+  padding: 7px 7px 6px;
+  font-size: 12px;
   font-weight: 500;
   color: var(--muted);
+  white-space: nowrap;
   cursor: pointer;
 }
 
@@ -847,9 +857,13 @@ body.resizing .devtools {
 }
 
 .chip[aria-pressed="true"] {
-  border-color: var(--line);
-  background: var(--surface-2);
+  border-bottom-color: var(--accent);
   color: var(--fg);
+}
+
+.chip .count {
+  margin-left: 3px;
+  font-weight: 400;
 }
 
 /* Types the page didn't load: still clickable, but quiet. */

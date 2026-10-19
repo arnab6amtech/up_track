@@ -659,6 +659,7 @@ function showNetwork(log: CaptureLog) {
   const chips = NETWORK_FILTERS.map((f) => {
     const n = f.types ? log.network.filter((e) => inFilter(e, f.id)).length : log.network.length;
     const chip = el("button", `chip${n ? "" : " none"}`, f.label);
+    if (n && f.types) chip.append(el("span", "count", String(n)));
     chip.type = "button";
     chip.dataset.filter = f.id;
     chip.title = `${n} ${n === 1 ? "request" : "requests"}`;

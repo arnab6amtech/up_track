@@ -32,13 +32,51 @@ body {
   gap: 10px;
 }
 
+/* The middle column is the drag handle; --side is the panel width the reporter dragged to. */
 .layout {
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) clamp(360px, 30vw, 480px);
-  gap: 12px;
+  grid-template-columns: minmax(0, 1fr) 12px var(--side, clamp(360px, 30vw, 480px));
   padding: 12px;
+}
+
+.resizer {
+  position: relative;
+  cursor: col-resize;
+  touch-action: none;
+  outline: none;
+}
+
+.resizer::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 4px;
+  height: 44px;
+  border-radius: 999px;
+  background: var(--line);
+  transform: translate(-50%, -50%);
+  transition: background 0.15s, height 0.15s;
+}
+
+.resizer:hover::after,
+.resizer:focus-visible::after,
+body.resizing .resizer::after {
+  height: 72px;
+  background: #a3a3a3;
+}
+
+/* While dragging: no text selection, and the cursor stays a resize cursor over the video and lists. */
+body.resizing {
+  cursor: col-resize;
+  user-select: none;
+}
+
+body.resizing .report,
+body.resizing .devtools {
+  pointer-events: none;
 }
 
 .report,
@@ -163,27 +201,162 @@ body {
   outline: none;
 }
 
-.stage video {
-  display: block;
+/* The recording, with its trimmer over the bottom edge. */
+.player {
+  position: relative;
   max-width: 100%;
+  overflow: hidden;
   border: 1px solid var(--line);
   border-radius: 6px;
   background: var(--bg);
+  line-height: 0;
 }
+
+.player video {
+  display: block;
+  max-width: 100%;
+}
+
+/* ---- Trimming a recording: thumbnails, a green selection with a handle at each end, and a playhead ---- */
 
 .trim {
-  flex: none;
+  --trim: #8ee3c4;
+  --trim-dark: #0f766e;
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
-  background: var(--bg);
-  border-top: 1px solid var(--line);
+  gap: 10px;
+  padding: 28px 12px 12px;
+  background: linear-gradient(to bottom, transparent, rgb(0 0 0 / 0.5));
+  line-height: normal;
 }
 
-.trim-hint {
-  margin-left: 4px;
+.trim-play {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 40px;
+  border: 0;
+  border-radius: 8px;
+  background: rgb(255 255 255 / 0.92);
+  color: var(--fg);
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.25);
+  cursor: pointer;
+}
+
+.trim-play:hover {
+  background: #fff;
+}
+
+.trim-play svg {
+  width: 20px;
+  height: 20px;
+}
+
+.trim-play .icon-pause,
+.trim-play.playing .icon-play {
+  display: none;
+}
+
+.trim-play.playing .icon-pause {
+  display: block;
+}
+
+.trim-track {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  height: 40px;
+  border-radius: 8px;
+  background: var(--bg);
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.25);
+  cursor: pointer;
+  touch-action: none;
+}
+
+.trim-film {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border-radius: 8px;
+}
+
+/* The parts left out are washed out. */
+.trim-shade {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  border-radius: 8px 0 0 8px;
+  background: rgb(245 245 245 / 0.78);
+  pointer-events: none;
+}
+
+.trim-shade.end {
+  left: auto;
+  right: 0;
+  border-radius: 0 8px 8px 0;
+}
+
+.trim-range {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border-top: 3px solid var(--trim);
+  border-bottom: 3px solid var(--trim);
+  pointer-events: none;
+}
+
+.trim-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  display: grid;
+  place-items: center;
+  width: 16px;
+  background: var(--trim);
+  color: #134e4a;
+  cursor: ew-resize;
+  outline: none;
+}
+
+.trim-handle.start {
+  border-radius: 8px 0 0 8px;
+}
+
+.trim-handle.end {
+  border-radius: 0 8px 8px 0;
+}
+
+.trim-handle svg {
+  width: 4px;
+  height: 14px;
+  fill: currentColor;
+}
+
+.trim-handle:hover,
+.trim-handle:focus-visible {
+  background: #6ad6ae;
+}
+
+.trim-playhead {
+  position: absolute;
+  top: -5px;
+  bottom: -5px;
+  width: 2px;
+  margin-left: -1px;
+  border-radius: 1px;
+  background: var(--trim-dark);
+  pointer-events: none;
+}
+
+#video {
+  cursor: pointer;
 }
 
 /* ---- Title, description and fields ---- */
@@ -395,7 +568,7 @@ body {
 
 .net summary {
   display: grid;
-  grid-template-columns: 34px 42px minmax(0, 1fr) auto;
+  grid-template-columns: 14px 34px 60px minmax(0, 1fr) auto;
   align-items: center;
   gap: 6px;
   padding: 7px 10px;
@@ -415,17 +588,6 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.entry-body {
-  display: grid;
-  gap: 8px;
-  padding: 8px 10px 10px;
-}
-
-.entry-body p {
-  margin: 0 0 3px;
-  font-weight: 600;
 }
 
 .entry pre {
@@ -507,6 +669,11 @@ body {
 
   .layout {
     grid-template-columns: 1fr;
+    gap: 12px;
+  }
+
+  .resizer {
+    display: none;
   }
 
   .media {
@@ -517,4 +684,173 @@ body {
   .devtools {
     max-height: 80vh;
   }
+}
+
+/* ---- One API call's details ---- */
+
+.call {
+  display: grid;
+  gap: 8px;
+  padding: 6px 10px 10px;
+}
+
+.call-error {
+  margin: 0;
+  color: var(--danger);
+}
+
+.call-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border-bottom: 1px solid var(--line);
+}
+
+.call-tabs {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.call-tab {
+  flex: none;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  background: none;
+  padding: 6px 7px;
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--muted);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.call-tab:hover {
+  color: var(--fg);
+}
+
+.call-tab[aria-selected="true"] {
+  color: var(--fg);
+  border-bottom-color: var(--accent);
+}
+
+.call-tab.empty {
+  opacity: 0.55;
+}
+
+.call-copy {
+  flex: none;
+}
+
+.entry pre.call-panel {
+  max-height: 260px;
+}
+
+/* ---- Choosing which requests and console entries to send ---- */
+
+.list-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 2px 8px 11px;
+}
+
+/* A small, quiet checkbox: a light outline, filled black when ticked, a dash when half-ticked. */
+.pick {
+  appearance: none;
+  flex: none;
+  display: inline-grid;
+  place-content: center;
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  border: 1.5px solid #c7c7c7;
+  border-radius: 4px;
+  background: var(--bg);
+  cursor: pointer;
+  transition: background 0.1s, border-color 0.1s;
+}
+
+.pick:hover {
+  border-color: var(--muted);
+}
+
+.pick:checked,
+.pick:indeterminate {
+  border-color: var(--accent);
+  background: var(--accent);
+}
+
+.pick:checked::after {
+  content: "";
+  width: 7px;
+  height: 4px;
+  margin-top: -2px;
+  border: solid #fff;
+  border-width: 0 0 1.5px 1.5px;
+  transform: rotate(-45deg);
+}
+
+.pick:indeterminate::after {
+  content: "";
+  width: 7px;
+  height: 1.5px;
+  background: #fff;
+}
+
+.pick:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.pick:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* Left out of the report: still readable, clearly set aside. */
+.excluded .net summary > :not(.pick),
+.excluded .call,
+.console-entry.excluded > :not(.console-head),
+.console-entry.excluded .console-head > :not(.pick) {
+  opacity: 0.4;
+}
+
+/* ---- Request type chips (as in DevTools) ---- */
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 4px;
+  margin-bottom: 8px;
+}
+
+.chip {
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: none;
+  padding: 2px 7px;
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.chip:hover {
+  color: var(--fg);
+}
+
+.chip[aria-pressed="true"] {
+  border-color: var(--line);
+  background: var(--surface-2);
+  color: var(--fg);
+}
+
+/* Types the page didn't load: still clickable, but quiet. */
+.chip.none {
+  opacity: 0.45;
 }

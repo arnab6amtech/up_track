@@ -4,7 +4,18 @@ import { Annotator, type Tool } from "./annotate";
 import { ApiError, fetchProjects, SignInRequired, upload } from "./shared/api";
 import { deleteDraft, getDraft } from "./shared/drafts";
 import { getSettings, signInUrl } from "./shared/settings";
-import { describeUserAgent, isFailed, SEVERITIES, type CaptureLog, type Draft, type PageInfo, type ReportableProject } from "./shared/types";
+import {
+  describeUserAgent,
+  inFilter,
+  isFailed,
+  NETWORK_FILTERS,
+  SEVERITIES,
+  type CaptureLog,
+  type Draft,
+  type NetworkEntry,
+  type PageInfo,
+  type ReportableProject,
+} from "./shared/types";
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const COLORS = ["#e11d48", "#f97316", "#facc15", "#16a34a", "#2563eb", "#0a0a0a"];
@@ -49,6 +60,8 @@ function fillChoice(id: string, items: { id: string; name: string }[], prompt: s
 
 interface LastChoice {
   projectId?: string;
+  /** The project's bug list, for the popup's home button. */
+  listPath?: string;
   versionId?: string;
   platformId?: string;
   componentId?: string;
@@ -72,11 +85,6 @@ function showVersions(projectId: string, preferred: LastChoice = {}) {
   // Every bug names its feature; a project without any can't take reports yet.
   const features = project?.components ?? [];
   fillChoice("module", features, features.length ? "Choose a feature" : "No features yet", preferred.componentId);
-  const missing = $("feature-missing");
-  missing.textContent = project
-    ? `${project.name} has no features yet, and every bug names one. Ask a project manager to add them in the project's settings.`
-    : "";
-  missing.hidden = !project || features.length > 0;
 }
 
 /** Projects in a picker, grouped by organization when the reporter belongs to several. */
@@ -213,30 +221,175 @@ async function setUpImage() {
 
 // ---- Recording trim ----
 
+const MIN_TRIM_MS = 500;
+const HANDLE_PX = 16;
+
 function setUpVideo() {
   const video = $<HTMLVideoElement>("video");
-  video.hidden = false;
+  $("player").hidden = false;
   $("trim").hidden = false;
   video.src = URL.createObjectURL(draft.blob);
+
+  const track = $("trim-track");
+  const startHandle = $("trim-start");
+  const endHandle = $("trim-end");
+  const play = $("trim-play");
   const duration = () => (Number.isFinite(video.duration) ? video.duration * 1000 : (draft.durationMs ?? 0));
-  const label = () => ($("trim-label").textContent = `${formatTime(trim.start)} to ${formatTime(trim.end)}`);
+  const share = (ms: number) => Math.min(Math.max(ms / Math.max(duration(), 1), 0), 1);
+  const at = (share: number) => `${(share * 100).toFixed(3)}%`;
+
+  /** Places the selection, the washed-out ends, the handles and the playhead. */
+  const layout = () => {
+    const s = share(trim.start);
+    const e = share(trim.end);
+    $("trim-shade-start").style.width = at(s);
+    $("trim-shade-end").style.width = at(1 - e);
+    Object.assign($("trim-range").style, { left: at(s), right: at(1 - e) });
+    startHandle.style.left = at(s);
+    endHandle.style.left = `calc(${at(e)} - ${HANDLE_PX}px)`;
+    $("trim-playhead").style.left = at(share(video.currentTime * 1000));
+    for (const [handle, ms] of [
+      [startHandle, trim.start],
+      [endHandle, trim.end],
+    ] as const) {
+      handle.setAttribute("aria-valuemin", "0");
+      handle.setAttribute("aria-valuemax", String(Math.round(duration())));
+      handle.setAttribute("aria-valuenow", String(Math.round(ms)));
+      handle.setAttribute("aria-valuetext", formatTime(ms));
+      handle.title = `${handle === startHandle ? "Starts" : "Ends"} at ${formatTime(ms)}. Drag to trim.`;
+    }
+  };
+
   video.addEventListener("loadedmetadata", () => {
     if (video.videoWidth && video.videoHeight) fitToStage(video, video.videoWidth, video.videoHeight);
     trim = { start: 0, end: duration() };
-    label();
+    layout();
+    void drawFilmstrip(video.src, $<HTMLCanvasElement>("trim-film"));
   });
-  $("trim-start").addEventListener("click", () => {
-    trim.start = Math.min(video.currentTime * 1000, trim.end - 500);
-    label();
+
+  // Playing stays inside the selection: it starts at the selection's start and stops at its end.
+  const toggle = () => {
+    if (video.paused) {
+      const now = video.currentTime * 1000;
+      if (now < trim.start || now >= trim.end - 50) video.currentTime = trim.start / 1000;
+      void video.play();
+    } else video.pause();
+  };
+  play.addEventListener("click", toggle);
+  video.addEventListener("click", toggle);
+  let frame = 0;
+  const follow = () => {
+    if (video.currentTime * 1000 >= trim.end) {
+      video.pause();
+      video.currentTime = trim.end / 1000;
+    }
+    layout();
+    if (!video.paused) frame = requestAnimationFrame(follow);
+  };
+  video.addEventListener("play", () => {
+    play.classList.add("playing");
+    play.setAttribute("aria-label", "Pause");
+    frame = requestAnimationFrame(follow);
   });
-  $("trim-end").addEventListener("click", () => {
-    trim.end = Math.max(video.currentTime * 1000, trim.start + 500);
-    label();
+  video.addEventListener("pause", () => {
+    play.classList.remove("playing");
+    play.setAttribute("aria-label", "Play");
+    cancelAnimationFrame(frame);
+    layout();
   });
-  $("trim-reset").addEventListener("click", () => {
-    trim = { start: 0, end: duration() };
-    label();
+  video.addEventListener("seeked", layout);
+
+  const msAt = (clientX: number) => {
+    const r = track.getBoundingClientRect();
+    return share(((clientX - r.left) / r.width) * duration()) * duration();
+  };
+  const setStart = (ms: number) => {
+    trim.start = Math.min(Math.max(ms, 0), trim.end - MIN_TRIM_MS);
+    video.currentTime = trim.start / 1000;
+    layout();
+  };
+  const setEnd = (ms: number) => {
+    trim.end = Math.max(Math.min(ms, duration()), trim.start + MIN_TRIM_MS);
+    video.currentTime = trim.end / 1000;
+    layout();
+  };
+
+  // Dragging a handle trims (and shows that frame); pressing anywhere else on the track moves the playhead.
+  // A handle is measured from its outer edge (the start handle's left, the end handle's right), so grabbing it
+  // by the middle doesn't make it jump.
+  const drag = (target: HTMLElement, move: (ms: number) => void, edge?: "left" | "right") => {
+    target.addEventListener("pointerdown", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      video.pause();
+      target.setPointerCapture(e.pointerId);
+      const box = target.getBoundingClientRect();
+      const offset = edge === "left" ? e.clientX - box.left : edge === "right" ? e.clientX - box.right : 0;
+      if (!edge) move(msAt(e.clientX));
+      const onMove = (m: PointerEvent) => move(msAt(m.clientX - offset));
+      const onUp = () => {
+        target.removeEventListener("pointermove", onMove);
+        target.removeEventListener("pointerup", onUp);
+        target.removeEventListener("pointercancel", onUp);
+      };
+      target.addEventListener("pointermove", onMove);
+      target.addEventListener("pointerup", onUp);
+      target.addEventListener("pointercancel", onUp);
+    });
+  };
+  drag(startHandle, setStart, "left");
+  drag(endHandle, setEnd, "right");
+  drag(track, (ms) => {
+    video.currentTime = Math.min(Math.max(ms, trim.start), trim.end) / 1000;
+    layout();
   });
+
+  // Keyboard: arrow keys move a handle by a tenth of a second, a second with Shift.
+  for (const [handle, set, get] of [
+    [startHandle, setStart, () => trim.start],
+    [endHandle, setEnd, () => trim.end],
+  ] as const) {
+    handle.addEventListener("keydown", (e) => {
+      const step = e.shiftKey ? 1000 : 100;
+      if (e.key === "ArrowLeft") set(get() - step);
+      else if (e.key === "ArrowRight") set(get() + step);
+      else return;
+      e.preventDefault();
+    });
+  }
+  window.addEventListener("resize", layout);
+}
+
+/** Thumbnails of the recording along the trim track, drawn from a second, hidden copy of the video. */
+async function drawFilmstrip(src: string, canvas: HTMLCanvasElement) {
+  const probe = document.createElement("video");
+  probe.muted = true;
+  probe.preload = "auto";
+  probe.src = src;
+  try {
+    await new Promise((resolve, reject) => {
+      probe.addEventListener("loadeddata", resolve, { once: true });
+      probe.addEventListener("error", reject, { once: true });
+    });
+    const dpr = window.devicePixelRatio || 1;
+    const { width, height } = canvas.getBoundingClientRect();
+    canvas.width = Math.round(width * dpr);
+    canvas.height = Math.round(height * dpr);
+    const ctx = canvas.getContext("2d")!;
+    const frameWidth = (height * dpr * probe.videoWidth) / Math.max(probe.videoHeight, 1);
+    const count = Math.max(1, Math.ceil(canvas.width / frameWidth));
+    const seconds = Number.isFinite(probe.duration) ? probe.duration : (draft.durationMs ?? 0) / 1000;
+    for (let i = 0; i < count; i++) {
+      probe.currentTime = ((i + 0.5) / count) * seconds;
+      await new Promise((resolve) => probe.addEventListener("seeked", resolve, { once: true }));
+      ctx.drawImage(probe, i * frameWidth, 0, frameWidth, canvas.height);
+    }
+  } catch {
+    // No thumbnails: the track stays plain, and trimming still works.
+  } finally {
+    probe.removeAttribute("src");
+    probe.load();
+  }
 }
 
 // ---- What was captured from the page ----
@@ -251,12 +404,102 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, t
 
 const clock = (ms: number) => new Date(ms).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 
-function showSummary(log: CaptureLog) {
-  const failed = log.network.filter(isFailed).length;
-  const errors = log.console.filter((c) => c.level === "error").length;
-  $("log-summary").textContent =
-    `${log.network.length} API ${log.network.length === 1 ? "call" : "calls"}, ${failed} failed · ` +
-    `${errors} console ${errors === 1 ? "error" : "errors"} · page and browser details`;
+// ---- Choosing what to send ----
+
+type LogKind = "network" | "console";
+
+/** Positions (in the captured log) of the API calls and console entries the reporter is sending. All, to start. */
+const sending: Record<LogKind, Set<number>> = { network: new Set(), console: new Set() };
+const rerender: Record<LogKind, () => void> = { network: () => {}, console: () => {} };
+/** Entries the list currently shows (after its filters), which "all" and "none" apply to. */
+const shown: Record<LogKind, number[]> = { network: [], console: [] };
+
+/** The log as it will be uploaded: only the entries the reporter kept. */
+function chosenLog(): CaptureLog {
+  return {
+    network: draft.log.network.filter((_, i) => sending.network.has(i)),
+    console: draft.log.console.filter((_, i) => sending.console.has(i)),
+  };
+}
+
+function includeBox(kind: LogKind, index: number, label: string): HTMLInputElement {
+  const box = el("input", "pick");
+  box.type = "checkbox";
+  box.checked = sending[kind].has(index);
+  box.title = "Send with the report";
+  box.setAttribute("aria-label", `Send ${label}`);
+  // Inside a row's summary: tick the box without opening or closing the row.
+  box.addEventListener("click", (e) => e.stopPropagation());
+  box.addEventListener("change", () => {
+    if (box.checked) sending[kind].add(index);
+    else sending[kind].delete(index);
+    box.closest("li")?.classList.toggle("excluded", !box.checked);
+    showSending();
+  });
+  return box;
+}
+
+/** The list header's checkbox and count, for the entries the list shows. */
+function showPicked(kind: LogKind) {
+  const picked = shown[kind].filter((i) => sending[kind].has(i)).length;
+  const box = document.querySelector<HTMLInputElement>(`.list-head .pick[data-kind="${kind}"]`)!;
+  box.checked = picked > 0 && picked === shown[kind].length;
+  box.indeterminate = picked > 0 && picked < shown[kind].length;
+  box.disabled = shown[kind].length === 0;
+  const noun = kind === "network" ? "request" : "entry";
+  const nouns = kind === "network" ? "requests" : "entries";
+  $(`picked-${kind}`).textContent = shown[kind].length
+    ? `${picked} of ${shown[kind].length} ${shown[kind].length === 1 ? noun : nouns} ticked`
+    : `No ${nouns} here`;
+}
+
+/** The form's summary of what goes with the report; its checkbox is ticked, clear or half-ticked to match. */
+function showSending() {
+  const { network, console: entries } = draft.log;
+  const total = network.length + entries.length;
+  const chosen = sending.network.size + sending.console.size;
+  const all = $<HTMLInputElement>("attach-log");
+  all.disabled = total === 0;
+  all.checked = chosen > 0;
+  all.indeterminate = chosen > 0 && chosen < total;
+  const failed = network.filter((e, i) => sending.network.has(i) && isFailed(e)).length;
+  const parts = [
+    ...(network.length ? [`${sending.network.size} of ${network.length} ${network.length === 1 ? "request" : "requests"}${failed ? ` (${failed} failed)` : ""}`] : []),
+    ...(entries.length ? [`${sending.console.size} of ${entries.length} console ${entries.length === 1 ? "entry" : "entries"}`] : []),
+    "page and browser details",
+  ];
+  $("log-summary").textContent = `Sending ${parts.join(" · ")}`;
+  showPicked("network");
+  showPicked("console");
+}
+
+function setAll(kind: LogKind, indexes: number[], on: boolean) {
+  for (const i of indexes) {
+    if (on) sending[kind].add(i);
+    else sending[kind].delete(i);
+  }
+  rerender[kind]();
+  showSending();
+}
+
+function setUpSending() {
+  draft.log.network.forEach((_, i) => sending.network.add(i));
+  draft.log.console.forEach((_, i) => sending.console.add(i));
+  // The form's checkbox sends everything or nothing.
+  $<HTMLInputElement>("attach-log").addEventListener("change", (e) => {
+    const on = (e.target as HTMLInputElement).checked;
+    setAll("network", draft.log.network.map((_, i) => i), on);
+    setAll("console", draft.log.console.map((_, i) => i), on);
+  });
+  // Each list's header box ticks or clears what the list shows, so "Img" then clearing it drops just the images.
+  document.querySelectorAll<HTMLInputElement>(".list-head .pick").forEach((box) =>
+    box.addEventListener("change", () => {
+      const kind = box.dataset.kind as LogKind;
+      const all = shown[kind].every((i) => sending[kind].has(i));
+      setAll(kind, shown[kind], !all);
+    }),
+  );
+  showSending();
   $("log-missing").hidden = draft.logAvailable;
 }
 
@@ -289,13 +532,122 @@ function showPage(page: PageInfo | null) {
   }
 }
 
-function codeBlock(title: string, text: string) {
-  const box = el("div");
-  box.append(el("p", undefined, title), el("pre", "mono", text));
+const headerText = (headers: Record<string, string>) => Object.entries(headers).map(([k, v]) => `${k}: ${v}`).join("\n");
+
+function pretty(body: string): string {
+  try {
+    return JSON.stringify(JSON.parse(body), null, 2);
+  } catch {
+    return body;
+  }
+}
+
+/** One call's URL, headers and bodies, a tab each. Opens on the response body, where the error usually is. */
+function callDetails(e: NetworkEntry): HTMLElement {
+  const requestHeaders = Object.keys(e.requestHeaders ?? {}).length;
+  const responseHeaders = Object.keys(e.responseHeaders ?? {}).length;
+  const tabs: { label: string; count?: number; text: string; empty: string }[] = [
+    { label: "URL", text: e.url, empty: "" },
+    { label: "Request headers", count: requestHeaders, text: headerText(e.requestHeaders ?? {}), empty: "No headers were recorded." },
+    { label: "Response headers", count: responseHeaders, text: headerText(e.responseHeaders ?? {}), empty: "No headers were recorded." },
+    { label: "Request body", text: e.requestBody ? pretty(e.requestBody) : "", empty: "No body was sent." },
+    { label: "Response body", text: e.responseBody ? pretty(e.responseBody) : "", empty: "No body was received." },
+  ];
+
+  const box = el("div", "call");
+  if (e.error) box.append(el("p", "call-error", `Error: ${e.error}`));
+  const bar = el("div", "call-bar");
+  const strip = el("div", "call-tabs");
+  strip.setAttribute("role", "tablist");
+  const copy = el("button", "btn btn-sm call-copy", "Copy");
+  copy.type = "button";
+  const panel = el("pre", "mono call-panel");
+  panel.setAttribute("role", "tabpanel");
+
+  let current = 0;
+  const buttons = tabs.map((t, i) => {
+    const button = el("button", `call-tab${t.text ? "" : " empty"}`, t.label);
+    button.type = "button";
+    button.setAttribute("role", "tab");
+    if (t.count) button.append(el("span", "count", ` ${t.count}`));
+    button.addEventListener("click", () => select(i));
+    return button;
+  });
+  function select(i: number) {
+    current = i;
+    buttons.forEach((b, j) => b.setAttribute("aria-selected", String(i === j)));
+    const t = tabs[i];
+    panel.textContent = t.text || t.empty;
+    panel.classList.toggle("muted", !t.text);
+    copy.hidden = !t.text;
+  }
+  copy.addEventListener("click", async () => {
+    try {
+      await navigator.clipboard.writeText(tabs[current].text);
+      copy.textContent = "Copied";
+    } catch {
+      copy.textContent = "Couldn't copy";
+    }
+    setTimeout(() => (copy.textContent = "Copy"), 1500);
+  });
+
+  strip.append(...buttons);
+  bar.append(strip, copy);
+  box.append(bar, panel);
+  // The response body if there is one, else the first headers or body that has something, else the URL.
+  const firstFilled = tabs.findIndex((t, i) => i > 0 && t.text);
+  select(e.responseBody ? tabs.length - 1 : Math.max(firstFilled, 0));
   return box;
 }
 
-const headerText = (headers: Record<string, string>) => Object.entries(headers).map(([k, v]) => `${k}: ${v}`).join("\n");
+/** Short type label for files, like DevTools' Type column; API calls show their method instead. */
+const TYPE_LABEL: Record<string, string> = {
+  document: "Doc",
+  stylesheet: "CSS",
+  script: "JS",
+  font: "Font",
+  image: "Img",
+  media: "Media",
+  manifest: "Manifest",
+  websocket: "WS",
+  wasm: "Wasm",
+  other: "Other",
+};
+
+function formatSize(bytes?: number): string {
+  if (!bytes) return "";
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(bytes < 10 * 1024 ? 1 : 0)} kB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
+/** The status column: the code, ERR for a failure without one, or a dash where the browser didn't say. */
+const statusLabel = (e: NetworkEntry) => (e.status ? String(e.status) : isFailed(e) ? "ERR" : "—");
+
+/** Files and sockets have no headers or bodies to show, just what the browser reported about them. */
+function resourceDetails(e: NetworkEntry): HTMLElement {
+  const box = el("div", "call");
+  const list = el("dl", "details");
+  const rows: [string, string][] = [
+    ["Type", TYPE_LABEL[e.type] ?? e.type],
+    ["URL", e.url],
+    ["Status", e.status ? `${e.status}${e.statusText ? ` ${e.statusText}` : ""}` : "Not reported by the browser"],
+    ...(e.sizeBytes ? ([["Size", formatSize(e.sizeBytes)]] as [string, string][]) : []),
+    ["Time", `${Math.round(e.durationMs)} ms`],
+    ...(e.error ? ([["Error", e.error]] as [string, string][]) : []),
+  ];
+  for (const [k, v] of rows) list.append(el("dt", undefined, k), el("dd", k === "URL" ? "mono" : undefined, v));
+  box.append(list);
+  return box;
+}
+
+const hasDetails = (e: NetworkEntry) =>
+  Boolean(e.requestBody || e.responseBody || Object.keys(e.requestHeaders ?? {}).length || Object.keys(e.responseHeaders ?? {}).length);
+
+/** Fetch and XHR calls show their method; everything else shows its type. */
+const isCall = (e: NetworkEntry) => e.type === "fetch" || e.type === "xhr";
+
+let typeFilter = "all";
 
 function showNetwork(log: CaptureLog) {
   const failed = log.network.filter(isFailed).length;
@@ -303,14 +655,34 @@ function showNetwork(log: CaptureLog) {
   count.replaceChildren(String(log.network.length));
   if (failed) count.append(" · ", el("span", "status-fail", `${failed} failed`));
 
+  // DevTools-style type chips, each with how many requests it holds.
+  const chips = NETWORK_FILTERS.map((f) => {
+    const n = f.types ? log.network.filter((e) => inFilter(e, f.id)).length : log.network.length;
+    const chip = el("button", `chip${n ? "" : " none"}`, f.label);
+    chip.type = "button";
+    chip.dataset.filter = f.id;
+    chip.title = `${n} ${n === 1 ? "request" : "requests"}`;
+    chip.setAttribute("aria-pressed", String(f.id === typeFilter));
+    chip.addEventListener("click", () => {
+      typeFilter = f.id;
+      chips.forEach((c) => c.setAttribute("aria-pressed", String(c === chip)));
+      render();
+    });
+    return chip;
+  });
+  $("network-types").replaceChildren(...chips);
+
   const render = () => {
     const failedOnly = $<HTMLInputElement>("failed-only").checked;
     const query = $<HTMLInputElement>("network-filter").value.trim().toLowerCase();
-    const calls = log.network.filter((e) => (!failedOnly || isFailed(e)) && (!query || e.url.toLowerCase().includes(query)));
+    const calls = log.network
+      .map((e, index) => ({ e, index }))
+      .filter(({ e }) => inFilter(e, typeFilter) && (!failedOnly || isFailed(e)) && (!query || e.url.toLowerCase().includes(query)));
+    shown.network = calls.map((c) => c.index);
     const list = $("network-list");
     list.replaceChildren(
-      ...calls.map((e) => {
-        const item = el("li");
+      ...calls.map(({ e, index }) => {
+        const item = el("li", sending.network.has(index) ? "" : "excluded");
         const details = el("details", "entry net");
         const summary = el("summary");
         let path = e.url;
@@ -318,34 +690,31 @@ function showNetwork(log: CaptureLog) {
           const u = new URL(e.url);
           path = u.pathname + u.search;
         } catch {}
+        const size = formatSize(e.sizeBytes);
         summary.append(
-          el("span", `mono ${isFailed(e) ? "status-fail" : "status-ok"}`, String(e.status || "ERR")),
-          el("span", "mono", e.method),
+          includeBox("network", index, `${e.method} ${e.url}`),
+          el("span", `mono ${isFailed(e) ? "status-fail" : e.status ? "status-ok" : "muted"}`, statusLabel(e)),
+          el("span", `mono${isCall(e) ? "" : " muted"}`, isCall(e) ? e.method : TYPE_LABEL[e.type]),
           Object.assign(el("span", "mono path", path), { title: e.url }),
-          el("span", "muted", `${Math.round(e.durationMs)} ms`),
+          el("span", "muted", `${size ? `${size} · ` : ""}${Math.round(e.durationMs)} ms`),
         );
-        const body = el("div", "entry-body");
-        body.append(codeBlock("URL", e.url));
-        if (e.error) body.append(codeBlock("Error", e.error));
-        if (e.requestHeaders && Object.keys(e.requestHeaders).length) body.append(codeBlock("Request headers", headerText(e.requestHeaders)));
-        if (e.requestBody) body.append(codeBlock("Request body", e.requestBody));
-        if (e.responseHeaders && Object.keys(e.responseHeaders).length) body.append(codeBlock("Response headers", headerText(e.responseHeaders)));
-        if (e.responseBody) body.append(codeBlock("Response body", e.responseBody));
-        details.append(summary, body);
+        details.append(summary, hasDetails(e) ? callDetails(e) : resourceDetails(e));
         item.append(details);
         return item;
       }),
     );
     const empty = $("network-empty");
     empty.textContent = !draft.logAvailable
-      ? "No API calls were recorded: the page was open before the extension was installed. Reload it and reproduce the bug."
-      : query && log.network.length
-        ? "No calls match that filter."
-        : failedOnly && log.network.length
-          ? "No failed calls."
-        : "The page made no API calls.";
+      ? "No requests were recorded: the page was open before the extension was installed. Reload it and reproduce the bug."
+      : !log.network.length
+        ? "The page made no requests."
+        : failedOnly
+          ? "No failed requests here."
+          : "No requests match these filters.";
     empty.hidden = calls.length > 0;
+    showPicked("network");
   };
+  rerender.network = render;
   $("failed-only").addEventListener("change", render);
   $("network-filter").addEventListener("input", render);
   render();
@@ -356,21 +725,31 @@ function showConsole(log: CaptureLog) {
   const count = $("count-console");
   count.replaceChildren(String(log.console.length));
   if (errors) count.append(" · ", el("span", "status-fail", `${errors} ${errors === 1 ? "error" : "errors"}`));
-  $("console-list").replaceChildren(
-    ...log.console.map((c) => {
-      const item = el("li", "entry console-entry");
-      const head = el("div", "console-head");
-      const source = c.source === "exception" ? "Uncaught exception" : c.source === "rejection" ? "Unhandled promise rejection" : `console.${c.level}`;
-      head.append(el("span", `level level-${c.level}`, c.level === "error" ? "Error" : "Warning"), el("span", "muted", `${source} · ${clock(c.at)}`));
-      item.append(head, el("p", "mono message", c.message));
-      if (c.stack) {
-        const stack = el("details");
-        stack.append(el("summary", "small", "Stack trace"), el("pre", "mono", c.stack));
-        item.append(stack);
-      }
-      return item;
-    }),
-  );
+  const render = () => {
+    shown.console = log.console.map((_, i) => i);
+    $("console-list").replaceChildren(
+      ...log.console.map((c, index) => {
+        const item = el("li", `entry console-entry${sending.console.has(index) ? "" : " excluded"}`);
+        const head = el("div", "console-head");
+        const source = c.source === "exception" ? "Uncaught exception" : c.source === "rejection" ? "Unhandled promise rejection" : `console.${c.level}`;
+        head.append(
+          includeBox("console", index, `console ${c.level}: ${c.message.slice(0, 80)}`),
+          el("span", `level level-${c.level}`, c.level === "error" ? "Error" : "Warning"),
+          el("span", "muted", `${source} · ${clock(c.at)}`),
+        );
+        item.append(head, el("p", "mono message", c.message));
+        if (c.stack) {
+          const stack = el("details");
+          stack.append(el("summary", "small", "Stack trace"), el("pre", "mono", c.stack));
+          item.append(stack);
+        }
+        return item;
+      }),
+    );
+  };
+  rerender.console = render;
+  render();
+  showPicked("console");
   const empty = $("console-empty");
   empty.textContent = draft.logAvailable ? "No console errors or warnings." : "Nothing was recorded: the page was open before the extension was installed.";
   empty.hidden = log.console.length > 0;
@@ -390,7 +769,7 @@ function setUpTabs() {
 }
 
 function showLog(log: CaptureLog) {
-  showSummary(log);
+  setUpSending();
   showPage(draft.page);
   showNetwork(log);
   showConsole(log);
@@ -446,7 +825,7 @@ $("form").addEventListener("submit", async (e) => {
         ...(trimmed ? { trimStartMs: Math.round(trim.start), trimEndMs: Math.round(trim.end) } : {}),
       },
     };
-    const log = $<HTMLInputElement>("attach-log").checked ? draft.log : { network: [], console: [] };
+    const log = chosenLog();
 
     const form = new FormData();
     form.append("meta", JSON.stringify(meta));
@@ -456,7 +835,14 @@ $("form").addEventListener("submit", async (e) => {
     const result = await upload(settings, form, (f) => ($("progress-bar").style.width = `${Math.round(f * 100)}%`));
     submitted = true;
     await deleteDraft(draft.id).catch(() => {});
-    const last: LastChoice = { projectId: meta.projectId, versionId: meta.versionId, platformId: meta.platformId, componentId: meta.componentId };
+    const reported = projects.find((p) => p.id === meta.projectId);
+    const last: LastChoice = {
+      projectId: meta.projectId,
+      listPath: reported ? `/o/${reported.organization.slug}/p/${reported.key}` : undefined,
+      versionId: meta.versionId,
+      platformId: meta.platformId,
+      componentId: meta.componentId,
+    };
     await chrome.storage.local.set({ [LAST_CHOICE]: last });
 
     $("form").hidden = true;
@@ -495,12 +881,84 @@ window.addEventListener("beforeunload", (e) => {
   if (!submitted && draft) e.preventDefault();
 });
 
+// ---- Resizing the side panel ----
+
+const SIDE_WIDTH = "sidePanelWidth";
+const SIDE_MIN = 300;
+/** The report keeps at least this much room. */
+const REPORT_MIN = 480;
+
+function setUpResizer() {
+  const layout = document.querySelector<HTMLElement>(".layout")!;
+  const handle = $("resizer");
+  const panel = document.querySelector<HTMLElement>(".devtools")!;
+  let saved: number | null = null;
+
+  // Room for the panel: the layout's inside width, less the handle and the report's minimum.
+  const room = () => {
+    const style = getComputedStyle(layout);
+    return layout.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight) - handle.offsetWidth - REPORT_MIN;
+  };
+  const limit = (width: number) => Math.round(Math.min(Math.max(width, SIDE_MIN), Math.max(SIDE_MIN, room())));
+  const apply = (width: number | null) => {
+    if (width === null) layout.style.removeProperty("--side");
+    else layout.style.setProperty("--side", `${limit(width)}px`);
+    handle.setAttribute("aria-valuenow", String(Math.round(panel.getBoundingClientRect().width)));
+  };
+  const save = (width: number | null) => {
+    saved = width === null ? null : limit(width);
+    void (saved === null ? chrome.storage.local.remove(SIDE_WIDTH) : chrome.storage.local.set({ [SIDE_WIDTH]: saved }));
+  };
+
+  void chrome.storage.local.get(SIDE_WIDTH).then((stored) => {
+    if (typeof stored[SIDE_WIDTH] === "number") apply((saved = stored[SIDE_WIDTH]));
+  });
+  // A narrower window may not fit the saved width any more.
+  window.addEventListener("resize", () => saved !== null && apply(saved));
+
+  // The panel's width is the distance from the pointer to the layout's right edge (less its padding).
+  const widthAt = (x: number) => layout.getBoundingClientRect().right - parseFloat(getComputedStyle(layout).paddingRight) - x - handle.offsetWidth / 2;
+  handle.addEventListener("pointerdown", (e) => {
+    e.preventDefault();
+    handle.setPointerCapture(e.pointerId);
+    document.body.classList.add("resizing");
+  });
+  handle.addEventListener("pointermove", (e) => {
+    if (handle.hasPointerCapture(e.pointerId)) apply(widthAt(e.clientX));
+  });
+  const finish = (e: PointerEvent) => {
+    if (!handle.hasPointerCapture(e.pointerId)) return;
+    handle.releasePointerCapture(e.pointerId);
+    document.body.classList.remove("resizing");
+    save(panel.getBoundingClientRect().width);
+  };
+  handle.addEventListener("pointerup", finish);
+  handle.addEventListener("pointercancel", finish);
+  handle.addEventListener("dblclick", () => {
+    apply(null);
+    save(null);
+  });
+  handle.addEventListener("keydown", (e) => {
+    const step = e.shiftKey ? 80 : 24;
+    const width = panel.getBoundingClientRect().width;
+    if (e.key === "ArrowLeft") apply(width + step);
+    else if (e.key === "ArrowRight") apply(width - step);
+    else return;
+    e.preventDefault();
+    save(panel.getBoundingClientRect().width);
+  });
+}
+
 // ---- Start ----
 
 (async () => {
+  setUpResizer();
   fillSelect("severity", SEVERITIES.map((v) => ({ value: v, label: capitalize(v) })), "medium");
   const projectsLoaded = loadProjects();
-  const id = new URLSearchParams(location.search).get("draft");
+  const params = new URLSearchParams(location.search);
+  const problem = params.get("error");
+  if (problem) return fail(problem);
+  const id = params.get("draft");
   const found = id ? await getDraft(id) : undefined;
   if (!found) return fail("This capture isn't available any more. Take a new screenshot or recording from the extension.");
   draft = found;

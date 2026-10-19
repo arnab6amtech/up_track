@@ -40,27 +40,37 @@
               <canvas id="canvas"></canvas>
               <textarea id="text-input" class="text-input" rows="1" hidden></textarea>
             </div>
-            <video id="video" controls playsinline hidden></video>
+            <!-- The video with its trimmer laid over its bottom edge. -->
+            <div id="player" class="player" hidden>
+              <video id="video" playsinline></video>
+              <!-- Drag the green handles to choose the part viewers see; the full recording is kept. -->
+              <div id="trim" class="trim" hidden>
+                <button type="button" class="trim-play" id="trim-play" aria-label="Play">
+                  <svg class="icon-play" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" aria-hidden="true"><path d="M6 4.2v11.6L15.5 10 6 4.2Z" /></svg>
+                  <svg class="icon-pause" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><rect x="5.5" y="4.5" width="3" height="11" rx="1" /><rect x="11.5" y="4.5" width="3" height="11" rx="1" /></svg>
+                </button>
+                <div class="trim-track" id="trim-track">
+                  <canvas class="trim-film" id="trim-film"></canvas>
+                  <div class="trim-shade" id="trim-shade-start"></div>
+                  <div class="trim-shade end" id="trim-shade-end"></div>
+                  <div class="trim-range" id="trim-range"></div>
+                  <div class="trim-handle start" id="trim-start" role="slider" tabindex="0" aria-label="Trim start"><svg viewBox="0 0 4 14" aria-hidden="true"><circle cx="2" cy="2" r="1.5" /><circle cx="2" cy="7" r="1.5" /><circle cx="2" cy="12" r="1.5" /></svg></div>
+                  <div class="trim-handle end" id="trim-end" role="slider" tabindex="0" aria-label="Trim end"><svg viewBox="0 0 4 14" aria-hidden="true"><circle cx="2" cy="2" r="1.5" /><circle cx="2" cy="7" r="1.5" /><circle cx="2" cy="12" r="1.5" /></svg></div>
+                  <div class="trim-playhead" id="trim-playhead"></div>
+                </div>
+              </div>
+            </div>
             <p id="load-error" class="notice" hidden></p>
-          </div>
-
-          <div id="trim" class="trim" hidden>
-            <strong class="small">Trim</strong>
-            <button type="button" class="btn btn-sm" id="trim-start">Start here</button>
-            <span class="mono small" id="trim-label">0:00 to 0:00</span>
-            <button type="button" class="btn btn-sm" id="trim-end">End here</button>
-            <button type="button" class="btn btn-sm" id="trim-reset">Reset</button>
-            <span class="small muted trim-hint">Viewers see this part. The full recording is kept.</span>
           </div>
         </div>
 
         <form id="form" class="report-form">
-          <input id="title" class="title-input" maxlength="300" placeholder="Title: what went wrong?" aria-label="Title" required />
+          <input id="title" class="title-input" maxlength="300" placeholder="What went wrong?" aria-label="Title" required />
           <textarea
             id="description"
             class="description-input"
             rows="2"
-            placeholder="Add a description: steps to reproduce, what you expected, what happened"
+            placeholder="Steps to reproduce, what you expected, what happened"
             aria-label="Description"
           ></textarea>
           <div class="fields">
@@ -86,9 +96,8 @@
             </div>
           </div>
           <p id="projects-error" class="notice" hidden></p>
-          <p id="feature-missing" class="notice" hidden></p>
           <div class="form-foot">
-            <label class="check small"><input type="checkbox" id="attach-log" checked /> Attach API calls and console log</label>
+            <label class="check small"><input type="checkbox" id="attach-log" checked /> Send network requests and console log</label>
             <span class="small muted" id="log-summary"></span>
           </div>
           <p id="log-missing" class="notice" hidden>
@@ -126,10 +135,20 @@
         </section>
       </section>
 
+      <div
+        id="resizer"
+        class="resizer"
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="Resize the side panel"
+        tabindex="0"
+        title="Drag to resize. Double-click to reset."
+      ></div>
+
       <aside class="devtools" aria-label="Captured from the page">
         <div class="tabs" role="tablist">
           <button type="button" role="tab" class="tab" data-tab="page" aria-selected="true">Captured page</button>
-          <button type="button" role="tab" class="tab" data-tab="network" aria-selected="false">API calls <span class="count" id="count-network"></span></button>
+          <button type="button" role="tab" class="tab" data-tab="network" aria-selected="false">Network <span class="count" id="count-network"></span></button>
           <button type="button" role="tab" class="tab" data-tab="console" aria-selected="false">Console log <span class="count" id="count-console"></span></button>
         </div>
         <div class="tab-body" id="tab-page" role="tabpanel">
@@ -137,13 +156,22 @@
         </div>
         <div class="tab-body" id="tab-network" role="tabpanel" hidden>
           <div class="tab-tools">
-            <input type="search" id="network-filter" class="input filter" placeholder="Filter by URL" aria-label="Filter API calls by URL" />
+            <input type="search" id="network-filter" class="input filter" placeholder="Filter by URL" aria-label="Filter requests by URL" />
             <label class="check small"><input type="checkbox" id="failed-only" /> Failed only</label>
+          </div>
+          <div class="chips" id="network-types" role="toolbar" aria-label="Request types"></div>
+          <div class="list-head">
+            <label class="check small"><input type="checkbox" class="pick" data-kind="network" /> <span id="picked-network"></span></label>
+            <span class="small muted">Only ticked requests are sent</span>
           </div>
           <ul class="entries" id="network-list"></ul>
           <p class="small muted empty" id="network-empty" hidden></p>
         </div>
         <div class="tab-body" id="tab-console" role="tabpanel" hidden>
+          <div class="list-head">
+            <label class="check small"><input type="checkbox" class="pick" data-kind="console" /> <span id="picked-console"></span></label>
+            <span class="small muted">Only ticked entries are sent</span>
+          </div>
           <ul class="entries" id="console-list"></ul>
           <p class="small muted empty" id="console-empty" hidden></p>
         </div>

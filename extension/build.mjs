@@ -1,6 +1,7 @@
 // Builds the browser extension into extension/dist. Load that folder with "Load unpacked" in chrome://extensions.
+// UPTRACK_URL sets the server it reports to (default http://localhost:3000).
 import { context, build } from "esbuild";
-import { cp, rm } from "node:fs/promises";
+import { cp, rm, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 
 const here = fileURLToPath(new URL(".", import.meta.url));
@@ -9,6 +10,9 @@ const watch = process.argv.includes("--watch");
 
 await rm(dist, { recursive: true, force: true });
 await cp(`${here}static`, dist, { recursive: true });
+// Where this build reports to. The zip UpTrack serves from its Extension page replaces it with the
+// server's own address, so only local builds use this.
+await writeFile(`${dist}/config.json`, JSON.stringify({ serverUrl: (process.env.UPTRACK_URL || "http://localhost:3000").replace(/\/+$/, "") }));
 
 const common = { bundle: true, target: "chrome116", outdir: dist, logLevel: "info", legalComments: "none" };
 const configs = [

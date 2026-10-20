@@ -4,8 +4,11 @@ A bug tracker for QA and development teams. QA reports bugs from a web form or s
 
 ## Organizations, projects and people
 
-- **Sign up** at `/signup`, then create an **organization** (for example *Null Void Studio*). You become its owner.
-- **Members** (`/o/<org>/settings/members`): invite people by email. Each invitation is a link, valid for 7 days, that you send yourself; there is no outgoing email yet. The person signs up (or signs in) with that email and accepts. Organization roles:
+- **Sign up** at `/signup` with an email and password, and choose an account type:
+  - **Organization**: you name your organization (for example *Null Void Studio*) and become its owner. Owners create and manage projects and invite developers and QA.
+  - **Personal**: for using UpTrack on your own. You get a private workspace with one project, *My bugs* (version 1.0, feature *General*), to report bugs to from the web or the extension. Personal accounts can't create projects or invite people.
+- An account counts as an **Organization account** when it belongs to any organization (as owner or invited member), otherwise a **Personal account**. The web app and the extension use the same rule. A Personal account that accepts an invitation keeps its workspace and gains the organization; anyone can add an organization later from the organization switcher.
+- **Members** (`/o/<org>/settings/members`): invite one or more people by email as **Developer**, **QA** (SQA engineer) or **Admin**, to all projects or only some. Each gets an email with **Accept** and **Decline** buttons, valid for 7 days (see `SMTP_URL` below; without it, the email is written to the server log and you get the links to copy). Declining needs no account, and the inviter sees it. To accept, the person signs up (or signs in) with the invited email; they join the organization and the chosen projects with that role. Organization roles:
   - **Owner**: everything, including other owners. An organization always keeps at least one owner.
   - **Admin**: manages members and projects, and can do everything in every project.
   - **Member**: works on the projects they're added to.
@@ -39,7 +42,9 @@ A bug tracker for QA and development teams. QA reports bugs from a web form or s
 - **Network and console log:** from page load, the extension records the page's `fetch`/XHR calls in full (method, URL, status, timing, headers, bodies up to 20 KB), everything else it loads as Chrome DevTools lists it (document, CSS, JS, fonts, images, media, manifest, WebSockets, Wasm and other: URL, status where the browser reports it, timing and size), files that fail to load, and its console errors and uncaught exceptions. Filter chips (All, Fetch/XHR, Doc, CSS, JS, Font, Img, Media, Manifest, Socket, Wasm, Other) work as in DevTools, and the reporter ticks which requests and console entries to send. Authorization headers, cookies, and fields or query parameters named like passwords, tokens, secrets or API keys are replaced with `[hidden by UpTrack]` before anything leaves the browser. Calls made by workers or other sites' iframes aren't seen.
 - **Create bug** picks the project, the version it was found in, the platform (when the project has platforms), the feature and the severity (the last choices are remembered), and files the bug in UpTrack. You get the bug key, its share link and the command for your AI agent.
 
-Install it from the app's **Extension** page: download the zip, which already contains this server's address, then use **Load unpacked** in `chrome://extensions`. There's nothing to configure: the extension reports as whoever is signed in to UpTrack in that browser, to the projects where they may report bugs, across all their organizations. When signed out, its menu offers a **Sign in** button. Signed-in uploads are accepted only from extension pages (checked by `Origin`). An API token in the extension's settings is optional, for people who'd rather not stay signed in.
+Install it from the app's **Extension** page: download the zip, which already contains this server's address, then use **Load unpacked** in `chrome://extensions`. There's nothing to type in but your sign-in: click the extension's icon and sign in with your UpTrack email and password. The extension then works out where reports can go: an organization member reports to the projects their role allows, across all their organizations; a Personal account reports to its personal workspace. The menu shows who you're signed in as and where reports go, and has **Sign out**.
+
+The extension keeps its own session (90 days), separate from the browser's UpTrack sign-in: it sends `Authorization: Bearer ses_…` and never cookies. Signing out ends that session on the server; if it expires or is ended, the menu asks to sign in again.
 
 Development:
 
@@ -51,7 +56,7 @@ npm run ext:check   # type-check the extension
 
 ## API tokens
 
-Coding agents sign in with a personal API token, and the extension can use one instead of the browser sign-in. Create one under **API tokens** in the user menu (`/o/<org>/settings/tokens`). A token belongs to one person in one organization and can do what that person can. It's shown once, stored only as a hash, and can be revoked at any time. Clients send `Authorization: Bearer upt_…`.
+Coding agents sign in with a personal API token. Create one under **API tokens** in the user menu (`/o/<org>/settings/tokens`). A token belongs to one person in one organization and can do what that person can. It's shown once, stored only as a hash, and can be revoked at any time. Clients send `Authorization: Bearer upt_…`.
 
 ## Coding agents (MCP)
 
@@ -126,7 +131,7 @@ cp .env.example .env.local   # optional; nothing is required to start
 npm run dev
 ```
 
-Open the app, sign up, and create your organization.
+Open the app and sign up with an Organization or a Personal account.
 
 ### Database
 
@@ -143,6 +148,9 @@ All optional; see `.env.example`.
 
 - `PUBLIC_URL`: the address people use to reach UpTrack, used in invite, share and agent links. Defaults to the request's own address.
 - `ALLOW_SIGNUPS=false`: only people with an invitation can create an account.
+- `SMTP_URL`: where invitation emails are sent through, e.g. `smtps://user:password@smtp.example.com:465`. Without it, emails are written to the server log and inviters copy the links themselves.
+- `MAIL_FROM`: the sender of those emails, e.g. `UpTrack <uptrack@yourcompany.com>`.
+- `UPTRACK_URL` (extension builds only): the server a local `npm run ext:build` reports to; defaults to `http://localhost:3000`. The zip from the Extension page always has the serving UpTrack's address.
 - Database and storage: `DATABASE_URL`, `DATABASE_POOL_SIZE`, `PGLITE_DIR`, `STORAGE_DIR`, `WORKBOOKS_DIR`.
 - **Google credentials**, for Drive links and a Drive-hosted default workbook in Sheets. Use one of:
   - **Service account** (works with private sheets): enable the Drive API in a Google Cloud project, create a service account, put its JSON key in `GOOGLE_SERVICE_ACCOUNT_KEY`, and share each sheet with the service account's email as **Viewer**.
@@ -151,7 +159,7 @@ All optional; see `.env.example`.
 
 ### Upgrading from the version without a database
 
-- **Tokens:** `MCP_TOKENS` is no longer used. Each person signs up, creates a token under **API tokens**, and puts it in their shell profile (`UPTRACK_TOKEN`) and their agent's MCP config. The extension uses the browser's UpTrack sign-in, so clear the old token from its settings.
+- **Tokens:** `MCP_TOKENS` is no longer used. Each person signs up, creates a token under **API tokens**, and puts it in their shell profile (`UPTRACK_TOKEN`) and their agent's MCP config. The extension now has its own sign-in; its old address and token settings are removed when it updates.
 - **Sheets** moved from `/` to `/sheets`. Imported workbooks are kept.
 - **Extension reports** saved in `data/workbooks/captures` can be imported into a project version. Old share links (`/c/<id>`) keep working.
 
@@ -164,7 +172,7 @@ All optional; see `.env.example`.
 
 ### Security notes
 
-- Passwords are hashed with scrypt. Sessions last 30 days in an HTTP-only cookie (secure in production) and are stored server-side, so signing out ends them.
+- Passwords are hashed with scrypt. Web sessions last 30 days in an HTTP-only cookie (secure in production); extension sessions last 90 days as a bearer token. Both are stored server-side as hashes, so signing out ends them.
 - API tokens, invitation links and share links are stored only as hashes.
 - Attachments are served only to signed-in members of the project, or through a valid share link.
 - Every organization's data is separated by organization ID in every query, and the schema has row-level security policies as a second line of defense when the app connects as a non-owner database role.

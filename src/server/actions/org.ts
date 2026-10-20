@@ -5,7 +5,8 @@ import { refresh } from "next/cache";
 import { z } from "zod";
 import { assertCan, getOrgContext } from "../access";
 import { publicOrigin } from "@/lib/origin";
-import { changeMemberRole, createInvitation, removeMember, revokeInvitation, UserError } from "../orgs";
+import { invitationMail, sendMail } from "../mail";
+import { changeMemberRole, createInvitation, INVITE_ROLES, markInvitationEmailed, removeMember, revokeInvitation, UserError, type InviteRole } from "../orgs";
 import { createProject } from "../projects";
 import { createToken, revokeToken } from "../tokens";
 import { attempt, text, type ActionState } from "./result";
@@ -13,6 +14,7 @@ import { attempt, text, type ActionState } from "./result";
 export async function createProjectAction(_prev: ActionState, form: FormData): Promise<ActionState> {
   return attempt(async () => {
     const ctx = await getOrgContext(text(form, "org"));
+    if (ctx.org.kind === "personal") throw new UserError("Personal accounts can't create projects. Create an organization to work on projects with a team.");
     if (!ctx.isAdmin) assertCan(ctx.permissions, "org.create_projects");
     const name = text(form, "name");
     const key = text(form, "key").toUpperCase();
@@ -30,17 +32,64 @@ export async function createProjectAction(_prev: ActionState, form: FormData): P
   });
 }
 
+export interface InviteResult {
+  email: string;
+  /** The link, to copy when the email couldn't be sent. */
+  link?: string;
+  emailed?: boolean;
+  error?: string;
+}
+
+/**
+ * Invites one or more people (separated by commas, spaces or new lines) as Developer, QA or Admin, to the
+ * chosen projects. Each gets an email with Accept and Decline; if email isn't set up, the inviter gets links.
+ */
 export async function inviteMemberAction(_prev: ActionState, form: FormData): Promise<ActionState> {
   return attempt(async () => {
     const ctx = await getOrgContext(text(form, "org"));
     assertCan(ctx.permissions, "org.manage_members");
-    const email = z.string().trim().toLowerCase().email().safeParse(text(form, "email"));
-    if (!email.success) throw new UserError("Enter a valid email address.");
-    const token = await createInvitation(ctx.org.id, ctx.user.id, email.data, text(form, "roleId"));
+    if (ctx.org.kind !== "organization") throw new UserError("Personal workspaces can't have members.");
+    const emails = [...new Set(text(form, "emails").toLowerCase().split(/[\s,;]+/).filter(Boolean))];
+    if (emails.length === 0) throw new UserError("Enter at least one email address.");
+    if (emails.length > 20) throw new UserError("Invite up to 20 people at a time.");
+    const invalid = emails.find((e) => !z.email().safeParse(e).success);
+    if (invalid) throw new UserError(`"${invalid}" isn't a valid email address.`);
+
+    const role = text(form, "role") as InviteRole;
+    if (!(role in INVITE_ROLES)) throw new UserError("Choose Developer, QA or Admin.");
+    if (role === "admin" && ctx.role.key !== "owner" && ctx.role.key !== "admin") throw new UserError("Only owners and admins can invite admins.");
+    // Every project (null) unless the inviter narrowed it down.
+    let projectIds: string[] | null = null;
+    if (role !== "admin" && text(form, "projects") === "some") {
+      projectIds = [...new Set(form.getAll("projectIds").map(String))];
+      if (projectIds.length === 0) throw new UserError("Pick at least one project, or invite them to all projects.");
+    }
+
+    const origin = await publicOrigin();
+    const results: InviteResult[] = [];
+    for (const email of emails) {
+      try {
+        const { id, token } = await createInvitation(ctx.org.id, ctx.user.id, email, role, projectIds);
+        const link = `${origin}/invite/${token}`;
+        let emailed = false;
+        try {
+          emailed = await sendMail(invitationMail({ to: email, orgName: ctx.org.name, inviterName: ctx.user.fullName, roleName: INVITE_ROLES[role].label, link }));
+          if (emailed) await markInvitationEmailed(ctx.org.id, id);
+        } catch (err) {
+          console.error(`[mail] couldn't send the invitation to ${email}`, err);
+        }
+        results.push({ email, emailed, link: emailed ? undefined : link });
+      } catch (err) {
+        if (!(err instanceof UserError)) throw err;
+        results.push({ email, error: err.message });
+      }
+    }
     refresh();
+    const sent = results.filter((r) => !r.error).length;
     return {
-      success: `Invitation created for ${email.data}.`,
-      data: { link: `${await publicOrigin()}/invite/${token}`, email: email.data },
+      success: sent ? `Invited ${sent} ${sent === 1 ? "person" : "people"}.` : undefined,
+      error: sent ? undefined : results[0]?.error,
+      data: { results: JSON.stringify(results), sentAt: String(Date.now()) },
     };
   });
 }

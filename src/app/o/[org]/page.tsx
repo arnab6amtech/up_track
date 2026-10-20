@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { Suspense } from "react";
 import { LocalTime } from "@/components/local-time";
 import { PriorityBadge, StatusPill } from "@/components/tracker-badges";
@@ -20,7 +21,9 @@ async function Dashboard({ params }: Pick<PageProps<"/o/[org]">, "params">) {
     listProjects(ctx.org.id, ctx.user.id, ctx.isAdmin),
     listAssignedOpenBugs(ctx.org.id, ctx.user.id),
   ]);
-  const canCreate = ctx.isAdmin || ctx.permissions.has("org.create_projects");
+  // A personal workspace has one project, so its home is that project's bugs.
+  if (ctx.org.kind === "personal" && projects.length === 1) redirect(`/o/${ctx.org.slug}/p/${projects[0].key}`);
+  const canCreate = ctx.org.kind === "organization" && (ctx.isAdmin || ctx.permissions.has("org.create_projects"));
   const base = `/o/${ctx.org.slug}`;
 
   return (

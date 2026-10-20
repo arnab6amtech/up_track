@@ -73,43 +73,142 @@ interface Role {
   key: string;
 }
 
-export function InviteForm({ org, roles }: { org: string; roles: Role[] }) {
+const INVITE_CHOICES = [
+  { value: "developer", label: "Developer", text: "Fixes bugs and moves them along." },
+  { value: "sqa", label: "QA", text: "Reports, verifies and closes bugs." },
+  { value: "admin", label: "Admin", text: "Runs every project and the team with you." },
+] as const;
+
+interface InviteResult {
+  email: string;
+  link?: string;
+  emailed?: boolean;
+  error?: string;
+}
+
+type InviteProject = { id: string; key: string; name: string };
+
+/**
+ * Invites developers and QA by email: one or more addresses, a role, and the projects they join. Each
+ * person is emailed Accept and Decline links; where email isn't set up, the links are shown to copy.
+ */
+export function InviteForm({ org, projects, canInviteAdmin }: { org: string; projects: InviteProject[]; canInviteAdmin: boolean }) {
   const [state, action] = useActionState<ActionState, FormData>(inviteMemberAction, {});
-  const link = state.data?.link ?? "";
-  const { state: copyState, copy } = useCopy(link);
+  const results: InviteResult[] = state.data?.results ? JSON.parse(state.data.results) : [];
   return (
-    <form action={action} className="space-y-3">
+    <div className="space-y-4">
+      {/* A new key after each send starts the form over: addresses, role and projects. */}
+      <InviteFields key={state.data?.sentAt ?? "new"} org={org} projects={projects} canInviteAdmin={canInviteAdmin} action={action} error={state.error} />
+      {results.length > 0 && !state.error && (
+        <ul className="divide-y divide-line rounded-lg border border-line bg-surface-2 text-sm">
+          {results.map((r) => (
+            <InviteResultRow key={r.email} result={r} />
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+function InviteFields({
+  org,
+  projects,
+  canInviteAdmin,
+  action,
+  error,
+}: {
+  org: string;
+  projects: InviteProject[];
+  canInviteAdmin: boolean;
+  action: (form: FormData) => void;
+  error?: string;
+}) {
+  const [role, setRole] = useState<(typeof INVITE_CHOICES)[number]["value"]>("developer");
+  const [scope, setScope] = useState<"all" | "some">("all");
+  const choices = canInviteAdmin ? INVITE_CHOICES : INVITE_CHOICES.filter((c) => c.value !== "admin");
+  return (
+    <form action={action} className="space-y-4">
       <input type="hidden" name="org" value={org} />
-      <div className="grid gap-3 sm:grid-cols-[1fr_12rem_auto] sm:items-end">
-        <Field label="Email" htmlFor="invite-email">
-          <input id="invite-email" name="email" type="email" required placeholder="sadia@example.com" className={inputClass} />
-        </Field>
-        <Field label="Role" htmlFor="invite-role">
-          <select id="invite-role" name="roleId" defaultValue={roles.find((r) => r.key === "member")?.id} className={selectClass}>
-            {roles.map((r) => (
-              <option key={r.id} value={r.id}>
-                {r.name}
-              </option>
-            ))}
-          </select>
-        </Field>
-        <SubmitButton pendingText="Inviting…">Invite</SubmitButton>
-      </div>
-      <FormMessage error={state.error} />
-      {link && (
-        <div className="space-y-2 rounded-lg border border-line bg-surface-2 p-3 text-sm">
-          <p>
-            Send this link to <span className="font-medium">{state.data?.email}</span>. It works once and expires in 7 days.
-          </p>
-          <div className="flex gap-2">
-            <input readOnly value={link} className={`${inputClass} font-mono text-xs`} onFocus={(e) => e.target.select()} />
-            <button type="button" onClick={copy} className="shrink-0 rounded-md bg-accent px-3 text-xs font-medium text-white">
-              {copyState === "copied" ? "Copied" : "Copy link"}
-            </button>
-          </div>
+      <input type="hidden" name="role" value={role} />
+      <Field label="Email addresses" htmlFor="invite-emails" hint="Separate several with commas or new lines.">
+        <textarea id="invite-emails" name="emails" rows={2} required placeholder="sadia@example.com, rafi@example.com" className={`${inputClass} resize-y`} />
+      </Field>
+      <fieldset>
+        <legend className="mb-1.5 block text-sm font-medium">Role</legend>
+        <div className={`grid gap-2 ${choices.length === 3 ? "sm:grid-cols-3" : "sm:grid-cols-2"}`}>
+          {choices.map((c) => (
+            <label
+              key={c.value}
+              className={`flex cursor-pointer gap-2.5 rounded-lg border p-3 transition has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-accent/20 ${
+                role === c.value ? "border-accent bg-surface-2" : "border-line hover:border-neutral-400"
+              }`}
+            >
+              <input type="radio" name="role-choice" checked={role === c.value} onChange={() => setRole(c.value)} className="mt-0.5 accent-accent" />
+              <span>
+                <span className="block text-sm font-medium">{c.label}</span>
+                <span className="block text-xs leading-snug text-muted">{c.text}</span>
+              </span>
+            </label>
+          ))}
+        </div>
+      </fieldset>
+      {role !== "admin" && (
+        <fieldset className="space-y-2">
+          <legend className="mb-1.5 block text-sm font-medium">Projects</legend>
+          {projects.length === 0 ? (
+            <p className="text-xs text-muted">There are no projects yet. Add people to projects later in each project&apos;s settings.</p>
+          ) : (
+            <>
+              <div className="flex flex-wrap gap-x-5 gap-y-1.5 text-sm">
+                <label className="flex items-center gap-2">
+                  <input type="radio" name="projects" value="all" checked={scope === "all"} onChange={() => setScope("all")} className="accent-accent" />
+                  All projects <span className="text-muted">({projects.length})</span>
+                </label>
+                <label className="flex items-center gap-2">
+                  <input type="radio" name="projects" value="some" checked={scope === "some"} onChange={() => setScope("some")} className="accent-accent" />
+                  Only some
+                </label>
+              </div>
+              {scope === "some" && (
+                <div className="grid gap-1.5 rounded-lg border border-line p-3 sm:grid-cols-2">
+                  {projects.map((p) => (
+                    <label key={p.id} className="flex min-w-0 items-center gap-2 text-sm">
+                      <input type="checkbox" name="projectIds" value={p.id} className="accent-accent" />
+                      <span className="rounded bg-surface-2 px-1 font-mono text-[11px] font-semibold">{p.key}</span>
+                      <span className="truncate">{p.name}</span>
+                    </label>
+                  ))}
+                </div>
+              )}
+            </>
+          )}
+        </fieldset>
+      )}
+      <FormMessage error={error} />
+      <SubmitButton pendingText="Sending invitations…">Send invitations</SubmitButton>
+    </form>
+  );
+}
+
+function InviteResultRow({ result: r }: { result: InviteResult }) {
+  const { state: copyState, copy } = useCopy(r.link ?? "");
+  return (
+    <li className="space-y-1.5 px-3 py-2.5">
+      <p className="flex flex-wrap items-center gap-x-2">
+        <span className="font-medium">{r.email}</span>
+        <span className={`text-xs ${r.error ? "text-red-700" : "text-muted"}`}>
+          {r.error ?? (r.emailed ? "Invitation emailed." : "Email isn't set up on this server, so send them this link.")}
+        </span>
+      </p>
+      {r.link && (
+        <div className="flex gap-2">
+          <input readOnly value={r.link} className={`${inputClass} font-mono text-xs`} onFocus={(e) => e.target.select()} aria-label={`Invitation link for ${r.email}`} />
+          <button type="button" onClick={copy} className="shrink-0 rounded-md bg-accent px-3 text-xs font-medium text-white">
+            {copyState === "copied" ? "Copied" : "Copy link"}
+          </button>
         </div>
       )}
-    </form>
+    </li>
   );
 }
 

@@ -3,7 +3,7 @@
 import { Annotator, type Tool } from "./annotate";
 import { ApiError, fetchProjects, SignInRequired, upload } from "./shared/api";
 import { deleteDraft, getDraft } from "./shared/drafts";
-import { getSettings, signInUrl } from "./shared/settings";
+import { getSettings, onAuthChange } from "./shared/settings";
 import {
   describeUserAgent,
   inFilter,
@@ -107,19 +107,15 @@ function fillProjects(selected: string) {
   );
 }
 
-const NO_SERVER = "Set up UpTrack first: open the extension's menu and enter your UpTrack address.";
+const NO_SERVER = "This copy of the extension doesn't know where UpTrack is. Download it again from UpTrack's Extension page.";
+const SIGN_IN = "Sign in to report this bug: click the UpTrack icon in the toolbar and sign in. Your capture stays here.";
 
-/** Explains why reporting can't continue; offers sign-in when that's the reason. */
-function blockProjects(message: string, signIn?: string) {
-  const notice = $("projects-error");
-  notice.replaceChildren(message);
-  if (signIn) {
-    const link = Object.assign(document.createElement("a"), { href: signIn, target: "_blank", textContent: "Sign in to UpTrack" });
-    link.className = "btn btn-primary btn-sm notice-action";
-    notice.append(link);
-  }
-  notice.hidden = false;
+/** Explains why reporting can't continue. */
+function blockProjects(message: string) {
+  $("projects-error").replaceChildren(message);
+  $("projects-error").hidden = false;
   $<HTMLButtonElement>("submit").disabled = true;
+  projectsReady = false;
 }
 
 let projectsReady = false;
@@ -130,7 +126,7 @@ async function loadProjects() {
   try {
     projects = (await fetchProjects(settings)).filter((p) => p.versions.length > 0);
   } catch (err) {
-    if (err instanceof SignInRequired) return blockProjects(err.message, signInUrl(settings));
+    if (err instanceof SignInRequired) return blockProjects(SIGN_IN);
     return blockProjects(err instanceof ApiError ? err.message : "Couldn't load your projects.");
   }
   if (projects.length === 0) {
@@ -146,10 +142,12 @@ async function loadProjects() {
 }
 
 $<HTMLSelectElement>("project").addEventListener("change", (e) => showVersions((e.target as HTMLSelectElement).value));
-// Coming back after signing in (or being added to a project) in another tab: try again.
+// Coming back after being added to a project in another tab: try again.
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible" && !projectsReady) void loadProjects();
 });
+// Signing in (or out) from the toolbar menu while this page is open.
+onAuthChange(() => void loadProjects());
 
 // ---- Fitting the capture on screen ----
 
@@ -977,7 +975,7 @@ $("form").addEventListener("submit", async (e) => {
     $<HTMLInputElement>("fix").value = result.fixCommand;
     $<HTMLAnchorElement>("open-bug").href = result.bugUrl;
   } catch (err) {
-    error.textContent = err instanceof ApiError ? err.message : `Something went wrong: ${String(err)}`;
+    error.textContent = err instanceof SignInRequired ? SIGN_IN : err instanceof ApiError ? err.message : `Something went wrong: ${String(err)}`;
     error.hidden = false;
     button.disabled = false;
     button.textContent = "Create bug";

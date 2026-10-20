@@ -2,10 +2,11 @@
 
 import { redirect } from "next/navigation";
 import { z } from "zod";
-import { hashPassword, verifyPassword } from "../auth/crypto";
+import { hashPassword } from "../auth/crypto";
+import { verifyCredentials } from "../auth/credentials";
 import { endSession, requireUser, startSession } from "../auth/session";
 import { getDb, one } from "../db";
-import { acceptInvitation, createOrganization, isUniqueViolation, slugify, UserError } from "../orgs";
+import { acceptInvitation, createOrganization, createPersonalWorkspace, declineInvitation, isUniqueViolation, slugify, UserError } from "../orgs";
 import { attempt, text, type ActionState } from "./result";
 
 /** Only same-site paths, so a crafted link can't send people elsewhere after signing in. */
@@ -15,26 +16,40 @@ function safeNext(value: string): string | null {
 
 const signupsOpen = () => process.env.ALLOW_SIGNUPS?.trim().toLowerCase() !== "false";
 
-// A real scrypt hash of a random password, checked when an email isn't found so both paths take as long.
-let dummyHash: Promise<string> | null = null;
-
 export async function signIn(_prev: ActionState, form: FormData): Promise<ActionState> {
   const next = safeNext(text(form, "next")) ?? "/";
   return attempt(async () => {
-    const email = text(form, "email").toLowerCase();
-    const password = String(form.get("password") ?? "");
-    const db = await getDb();
-    const user = await one<{ id: string; password_hash: string | null; status: string }>(
-      db,
-      "select id, password_hash, status from users where email = $1 and deleted_at is null",
-      [email],
-    );
-    dummyHash ??= hashPassword(crypto.randomUUID());
-    const valid = await verifyPassword(password, user?.password_hash ?? (await dummyHash));
-    if (!user || !valid || user.status !== "active") throw new UserError("That email and password don't match an account.");
-    await startSession(user.id);
+    const userId = await verifyCredentials(text(form, "email"), String(form.get("password") ?? ""));
+    if (!userId) throw new UserError("That email and password don't match an account.");
+    await startSession(userId);
     redirect(next);
   });
+}
+
+/**
+ * What a new account starts with. "personal": a private workspace with one project, to report bugs on
+ * your own. "organization": an organization you own, to create projects and invite developers and QA.
+ */
+const accountSchema = z.discriminatedUnion("accountType", [
+  z.object({ accountType: z.literal("personal") }),
+  z.object({
+    accountType: z.literal("organization"),
+    orgName: z.string().trim().min(1, "Enter your organization's name.").max(200, "Use a shorter organization name."),
+  }),
+]);
+
+function parseAccount(form: FormData) {
+  const parsed = accountSchema.safeParse({ accountType: text(form, "accountType"), orgName: text(form, "orgName") });
+  if (!parsed.success) {
+    throw new UserError(parsed.error.issues[0].path[0] === "accountType" ? "Choose a Personal or an Organization account." : parsed.error.issues[0].message);
+  }
+  return parsed.data;
+}
+
+/** Creates the account's workspace and returns where to go next. */
+async function setUpAccount(user: { id: string; fullName: string }, account: z.infer<typeof accountSchema>): Promise<string> {
+  if (account.accountType === "personal") return `/o/${await createPersonalWorkspace(user.id, user.fullName)}`;
+  return `/o/${await createOrganization(user.id, account.orgName, slugify(account.orgName) || "org", { fallbackSlug: true })}`;
 }
 
 const signupSchema = z.object({
@@ -55,6 +70,9 @@ export async function signUp(_prev: ActionState, form: FormData): Promise<Action
       password: String(form.get("password") ?? ""),
     });
     if (!parsed.success) throw new UserError(parsed.error.issues[0].message);
+    // People joining through an invitation get their organization from it; everyone else picks a type.
+    const joining = next?.startsWith("/invite/") ?? false;
+    const account = joining ? null : parseAccount(form);
     const db = await getDb();
     let userId: string;
     try {
@@ -69,7 +87,15 @@ export async function signUp(_prev: ActionState, form: FormData): Promise<Action
       throw err;
     }
     await startSession(userId);
-    redirect(next ?? "/onboarding");
+    if (!account) redirect(next ?? "/");
+    let destination = "/onboarding";
+    try {
+      destination = await setUpAccount({ id: userId, fullName: parsed.data.fullName }, account);
+    } catch (err) {
+      // The account exists either way; onboarding lets them try the workspace again.
+      console.error("[signup] couldn't set up the workspace", err);
+    }
+    redirect(destination);
   });
 }
 
@@ -78,15 +104,17 @@ export async function signOut() {
   redirect("/login");
 }
 
-export async function createOrganizationAction(_prev: ActionState, form: FormData): Promise<ActionState> {
+/** Onboarding: sets up a Personal workspace or a new organization for someone already signed in. */
+export async function setUpAccountAction(_prev: ActionState, form: FormData): Promise<ActionState> {
   return attempt(async () => {
     const user = await requireUser("/onboarding");
-    const name = text(form, "name");
-    const slug = slugify(text(form, "slug") || name);
-    if (!name) throw new UserError("Give your organization a name.");
-    if (slug.length < 2) throw new UserError("The address needs at least two letters or numbers.");
-    const created = await createOrganization(user.id, name, slug);
-    redirect(`/o/${created}`);
+    const account = parseAccount(form);
+    if (account.accountType === "organization" && text(form, "slug")) {
+      const slug = slugify(text(form, "slug"));
+      if (slug.length < 2) throw new UserError("The address needs at least two letters or numbers.");
+      redirect(`/o/${await createOrganization(user.id, account.orgName, slug)}`);
+    }
+    redirect(await setUpAccount(user, account));
   });
 }
 
@@ -96,5 +124,12 @@ export async function acceptInvitationAction(_prev: ActionState, form: FormData)
     const user = await requireUser(`/invite/${token}`);
     const slug = await acceptInvitation(token, user);
     redirect(`/o/${slug}`);
+  });
+}
+
+export async function declineInvitationAction(_prev: ActionState, form: FormData): Promise<ActionState> {
+  return attempt(async () => {
+    const invite = await declineInvitation(text(form, "token"));
+    return { success: `You declined the invitation to ${invite.orgName}.` };
   });
 }

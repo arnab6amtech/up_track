@@ -67,6 +67,32 @@ body {
   line-height: 1.5;
 }
 
+/* Who reports come from, with sign-out, under the capture buttons. */
+.account {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border-top: 1px solid var(--line, #e5e5e5);
+  padding-top: 10px;
+}
+
+.account-who {
+  flex: 1;
+  min-width: 0;
+}
+
+.account-who p {
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#signin a {
+  color: inherit;
+  font-weight: 600;
+}
+
 .rec {
   display: flex;
   align-items: center;

@@ -13,7 +13,13 @@ export async function AppHeaderContent() {
     );
   }
   const orgs = await listMyOrganizations(user.id);
-  return <AppNav user={{ fullName: user.fullName, email: user.email }} orgs={orgs.map((o) => ({ slug: o.slug, name: o.name }))} />;
+  return (
+    <AppNav
+      user={{ fullName: user.fullName, email: user.email }}
+      orgs={orgs.map((o) => ({ slug: o.slug, name: o.name, kind: o.kind }))}
+      accountType={orgs.some((o) => o.kind === "organization") ? "organization" : "personal"}
+    />
+  );
 }
 
 /** The floating agent guide is only useful to signed-in people. */

@@ -209,7 +209,13 @@ export async function getTrackerBug(caller: TokenCaller, key: string, baseUrl: s
   const comments = await listComments(caller.orgId, bug.id);
   if (comments.length) {
     lines.push("", `## Comments (${comments.length})`);
-    for (const c of comments.slice(-10)) lines.push(`- **${c.authorName}:** ${clip(c.body.replace(/\s+/g, " "), 500)}`);
+    // Each comment followed by its replies, indented; the last ten lines keep the latest discussion.
+    const threaded = comments
+      .filter((c) => !c.parentId)
+      .flatMap((root) => [root, ...comments.filter((c) => c.parentId === root.id)]);
+    for (const c of threaded.slice(-10)) {
+      lines.push(`${c.parentId ? "  - ↳" : "-"} **${c.authorName}:** ${clip(c.body.replace(/\s+/g, " "), 500)}`);
+    }
   }
   return text(lines.join("\n"));
 }

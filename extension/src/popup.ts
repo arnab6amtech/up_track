@@ -1,15 +1,14 @@
-import { ApiError, ping, SignInRequired } from "./shared/api";
+import { ApiError, ping, signIn, SignInRequired, signOut, type Who } from "./shared/api";
 import { isRestricted } from "./shared/restricted";
-import { getSettings, normalizeServerUrl, saveSettings, signInUrl, type Settings } from "./shared/settings";
+import { forgetOldSettings, getSettings, serverUrl, signUpUrl, type Settings } from "./shared/settings";
 import { recordedMs, type BackgroundMessage, type RecordingState } from "./shared/types";
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
-const views = { setup: $("setup"), signin: $("signin"), actions: $("actions"), recording: $("recording") };
+const views = { signin: $("signin"), actions: $("actions"), recording: $("recording") };
 
 function show(view: keyof typeof views) {
   for (const [name, el] of Object.entries(views)) el.hidden = name !== view;
-  $("open-settings").hidden = view !== "actions" && view !== "signin";
-  $("open-home").hidden = view !== "actions" && view !== "signin";
+  $("open-home").hidden = view !== "actions";
 }
 
 function showError(id: string, message: string | null) {
@@ -40,15 +39,23 @@ function showRecording(state: RecordingState) {
   timer = setInterval(tick, 500);
 }
 
+/** Asks for an email and password; a reason says why (e.g. the sign-in expired). */
 function showSignIn(settings: Settings, reason?: string) {
   show("signin");
-  $("signin-host").textContent = new URL(settings.serverUrl).host;
-  $("signin-reason").textContent = reason ?? "";
-  $("signin-reason").hidden = !reason || !settings.token;
-  $("signin-open").onclick = () => {
-    void chrome.tabs.create({ url: signInUrl(settings) });
+  showError("signin-error", reason ?? null);
+  $("signup-open").onclick = (e) => {
+    e.preventDefault();
+    void chrome.tabs.create({ url: signUpUrl(settings) });
     window.close();
   };
+  $<HTMLInputElement>("email").focus();
+}
+
+/** "Reporting to Null Void Studio", "to your personal workspace", or several organizations. */
+function describeWhere(who: Who): string {
+  const orgs = who.workspaces.filter((w) => w.kind === "organization").map((w) => w.name);
+  if (who.account === "personal") return "Personal account · your workspace";
+  return `Organization account · ${orgs.length === 1 ? orgs[0] : `${orgs.length} organizations`}`;
 }
 
 async function showActions(settings: Settings) {
@@ -58,56 +65,49 @@ async function showActions(settings: Settings) {
   $<HTMLButtonElement>("screenshot").disabled = restricted;
   $<HTMLButtonElement>("record").disabled = restricted;
   $("restricted").hidden = !restricted;
-  // Show who reports come from. Signed out: ask them to sign in before they capture anything.
+  $("account-name").textContent = "Checking your account…";
+  $("account-where").textContent = "";
+  // Who reports come from, and where they go. A sign-in that stopped working asks for a new one.
   ping(settings).then(
     (who) => {
-      const orgs = who.organizations.length === 1 ? ` to ${who.organizations[0]}` : "";
-      $("connected").textContent = `Reporting as ${who.name}${orgs}.`;
-      $("token-note").hidden = !who.tokenRejected;
+      $("account-name").textContent = `${who.name} (${who.email})`;
+      $("account-where").textContent = describeWhere(who);
     },
     (err) => {
-      if (err instanceof SignInRequired) showSignIn(settings, err.message);
-      else $("connected").textContent = `Can't reach ${new URL(settings.serverUrl).host} right now.`;
+      if (err instanceof SignInRequired) showSignIn({ serverUrl: settings.serverUrl }, err.message);
+      else $("account-name").textContent = err instanceof ApiError ? err.message : "Can't reach UpTrack right now.";
     },
   );
 }
 
-async function showSetup() {
-  show("setup");
-  const settings = await getSettings();
-  $<HTMLInputElement>("server").value = settings?.serverUrl ?? "";
-  $<HTMLInputElement>("token").value = settings?.token ?? "";
-  $<HTMLInputElement>("server").focus();
-}
-
-$("settings-form").addEventListener("submit", async (e) => {
+$("signin-form").addEventListener("submit", async (e) => {
   e.preventDefault();
-  showError("settings-error", null);
-  const serverUrl = normalizeServerUrl($<HTMLInputElement>("server").value);
-  const token = $<HTMLInputElement>("token").value.trim();
-  if (!serverUrl) return showError("settings-error", "That address doesn't look right.");
-  const button = $<HTMLButtonElement>("settings-save");
+  showError("signin-error", null);
+  const url = await serverUrl();
+  const button = $<HTMLButtonElement>("signin-submit");
   button.disabled = true;
-  button.textContent = "Connecting…";
-  const settings: Settings = token ? { serverUrl, token } : { serverUrl };
+  button.textContent = "Signing in…";
   try {
-    await ping(settings);
-    await saveSettings(settings);
-    await showActions(settings);
+    const auth = await signIn(url, $<HTMLInputElement>("email").value.trim(), $<HTMLInputElement>("password").value);
+    $<HTMLInputElement>("password").value = "";
+    await showActions({ serverUrl: url, token: auth.token });
   } catch (err) {
-    if (err instanceof SignInRequired && !token) {
-      // The address works; they just aren't signed in yet.
-      await saveSettings(settings);
-      return showSignIn(settings);
-    }
-    showError("settings-error", err instanceof ApiError ? err.message : "Something went wrong. Try again.");
+    showError("signin-error", err instanceof ApiError ? err.message : "Something went wrong. Try again.");
   } finally {
     button.disabled = false;
-    button.textContent = "Save and connect";
+    button.textContent = "Sign in";
   }
 });
 
-$("open-settings").addEventListener("click", () => void showSetup());
+$("signout").addEventListener("click", async () => {
+  const settings = await getSettings();
+  if (!settings) return;
+  await signOut(settings);
+  // Usually to switch accounts, so start empty.
+  $<HTMLInputElement>("email").value = "";
+  $<HTMLInputElement>("password").value = "";
+  showSignIn({ serverUrl: settings.serverUrl });
+});
 
 // Home: the bug list of the project last reported to, else UpTrack's start page (it picks the organization).
 $("open-home").addEventListener("click", async () => {
@@ -145,7 +145,12 @@ $("stop").addEventListener("click", async () => {
 (async () => {
   const state = await send<{ recording: RecordingState | null }>({ type: "state" });
   if (state.recording) return showRecording(state.recording);
+  await forgetOldSettings();
   const settings = await getSettings();
-  if (settings) await showActions(settings);
-  else await showSetup();
+  if (!settings) {
+    show("signin");
+    return showError("signin-error", "This copy of the extension doesn't know where UpTrack is. Download it again from UpTrack's Extension page.");
+  }
+  if (settings.token) await showActions(settings);
+  else showSignIn(settings);
 })();

@@ -86,7 +86,10 @@ const logSchema = z.object({
 
 const fail = (status: number, message: string) => Response.json({ error: message }, { status });
 
-/** Lets the extension check its server address and who it will report as. */
+/**
+ * Who the extension reports as: the person, their account type ("organization" if they belong to any
+ * organization, else "personal") and the workspaces their reports can go to.
+ */
 export async function GET(request: Request) {
   const auth = await authenticateReporter(request);
   if ("error" in auth) return fail(auth.status, auth.error);
@@ -94,9 +97,10 @@ export async function GET(request: Request) {
   return Response.json({
     ok: true,
     name: reporter.userName,
-    organizations: reporter.orgs.map((o) => o.name),
+    email: reporter.email,
+    account: reporter.account,
+    workspaces: reporter.orgs.map((o) => ({ name: o.name, kind: o.kind })),
     via: reporter.via,
-    tokenRejected: reporter.tokenRejected,
   });
 }
 

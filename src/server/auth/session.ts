@@ -7,6 +7,8 @@ import { newToken, sha256 } from "./crypto";
 
 export const SESSION_COOKIE = "uptrack_session";
 const SESSION_DAYS = 30;
+// The extension keeps its own sign-in, so people aren't asked for their password every month.
+const EXTENSION_SESSION_DAYS = 90;
 
 export interface CurrentUser {
   id: string;
@@ -14,18 +16,24 @@ export interface CurrentUser {
   fullName: string;
 }
 
-/** Starts a session for the user and sets the cookie. Call from a server action or route handler. */
-export async function startSession(userId: string): Promise<void> {
+/** Records a new session and returns its secret token; only the token's hash is stored. */
+async function createSession(userId: string, client: "web" | "extension", h: Headers): Promise<{ token: string; expires: Date }> {
   const token = newToken("ses");
-  const h = await headers();
-  const expires = new Date(Date.now() + SESSION_DAYS * 24 * 60 * 60 * 1000);
+  const days = client === "extension" ? EXTENSION_SESSION_DAYS : SESSION_DAYS;
+  const expires = new Date(Date.now() + days * 24 * 60 * 60 * 1000);
   const ip = h.get("x-forwarded-for")?.split(",")[0]?.trim() || null;
   const db = await getDb();
   await db.query(
-    "insert into sessions (user_id, token_hash, user_agent, ip_address, expires_at) values ($1, $2, $3, $4::inet, $5)",
-    [userId, sha256(token), h.get("user-agent")?.slice(0, 500) ?? null, ip && /^[\d.:a-f]+$/i.test(ip) ? ip : null, expires],
+    "insert into sessions (user_id, token_hash, user_agent, ip_address, expires_at, client) values ($1, $2, $3, $4::inet, $5, $6)",
+    [userId, sha256(token), h.get("user-agent")?.slice(0, 500) ?? null, ip && /^[\d.:a-f]+$/i.test(ip) ? ip : null, expires, client],
   );
   await db.query("update users set last_login_at = now() where id = $1", [userId]);
+  return { token, expires };
+}
+
+/** Starts a session for the user and sets the cookie. Call from a server action or route handler. */
+export async function startSession(userId: string): Promise<void> {
+  const { token, expires } = await createSession(userId, "web", await headers());
   (await cookies()).set(SESSION_COOKIE, token, {
     httpOnly: true,
     sameSite: "lax",
@@ -42,10 +50,25 @@ export async function endSession(): Promise<void> {
   jar.delete(SESSION_COOKIE);
 }
 
+/** Signs the browser extension in: a session of its own, sent back as a bearer token. */
+export async function startExtensionSession(userId: string, request: Request): Promise<{ token: string; expiresAt: Date }> {
+  const { token, expires } = await createSession(userId, "extension", request.headers);
+  return { token, expiresAt: expires };
+}
+
+/** Ends the extension's session (its "Authorization: Bearer ses_…" token). */
+export async function endExtensionSession(token: string): Promise<void> {
+  await (await getDb()).query("delete from sessions where token_hash = $1 and client = 'extension'", [sha256(token)]);
+}
+
 /** The signed-in user, or null. Looked up once per request. */
 export const getCurrentUser = cache(async (): Promise<CurrentUser | null> => {
   const token = (await cookies()).get(SESSION_COOKIE)?.value;
-  if (!token) return null;
+  return token ? userForSession(token) : null;
+});
+
+/** Whose session a token belongs to, if it's still valid and the person is still active. */
+export async function userForSession(token: string): Promise<CurrentUser | null> {
   const db = await getDb();
   const row = await one<{ id: string; email: string; full_name: string }>(
     db,
@@ -60,7 +83,7 @@ export const getCurrentUser = cache(async (): Promise<CurrentUser | null> => {
     sha256(token),
   ]);
   return { id: row.id, email: row.email, fullName: row.full_name };
-});
+}
 
 /** The signed-in user; sends everyone else to the sign-in page and back here afterwards. */
 export async function requireUser(returnTo?: string): Promise<CurrentUser> {

@@ -1,10 +1,12 @@
 import type { ReportableProject } from "./types";
-import type { Settings } from "./settings";
+import { clearAuth, saveAuth, type Auth, type Settings } from "./settings";
 
 export class ApiError extends Error {}
 
-/** UpTrack doesn't know who this is: not signed in in this browser, and no working token. */
+/** The extension isn't signed in, or its sign-in expired or was revoked. */
 export class SignInRequired extends ApiError {}
+
+const UNREACHABLE = "Couldn't reach UpTrack. Check your connection and try again.";
 
 async function failure(res: Response): Promise<ApiError> {
   let text = `UpTrack answered with HTTP ${res.status}.`;
@@ -12,33 +14,67 @@ async function failure(res: Response): Promise<ApiError> {
     const body = (await res.json()) as { error?: string };
     if (body.error) text = body.error;
   } catch {}
-  return res.status === 401 ? new SignInRequired(text) : new ApiError(text);
+  if (res.status !== 401) return new ApiError(text);
+  // The session is gone (expired, or signed out elsewhere): forget it so the menu asks to sign in again.
+  await clearAuth();
+  return new SignInRequired(text);
 }
 
-/** Sends the browser's UpTrack sign-in (cookies) along, plus the token when one is set. */
+/** Sends the extension's own sign-in as a bearer token; never the browser's cookies. */
 async function get(settings: Settings, path: string): Promise<Response> {
+  if (!settings.token) throw new SignInRequired("Sign in to UpTrack to report bugs.");
   let res: Response;
   try {
-    res = await fetch(`${settings.serverUrl}${path}`, {
-      credentials: "include",
-      headers: settings.token ? { Authorization: `Bearer ${settings.token}` } : {},
-    });
+    res = await fetch(`${settings.serverUrl}${path}`, { credentials: "omit", headers: { Authorization: `Bearer ${settings.token}` } });
   } catch {
-    throw new ApiError("Couldn't reach UpTrack at that address. Is it running, and is the address right?");
+    throw new ApiError(UNREACHABLE);
   }
   if (!res.ok) throw await failure(res);
   return res;
 }
 
-export interface Who {
-  name: string;
-  organizations: string[];
-  via: "token" | "session";
-  /** The saved token no longer works; the browser's sign-in was used instead. */
-  tokenRejected: boolean;
+/** Signs in with an email and password and keeps the session for later requests. */
+export async function signIn(serverUrl: string, email: string, password: string): Promise<Auth> {
+  let res: Response;
+  try {
+    res = await fetch(`${serverUrl}/api/extension/session`, {
+      method: "POST",
+      credentials: "omit",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, password }),
+    });
+  } catch {
+    throw new ApiError(UNREACHABLE);
+  }
+  const body = (await res.json().catch(() => ({}))) as { token?: string; user?: { name: string; email: string }; error?: string };
+  if (!res.ok || !body.token) throw new ApiError(body.error ?? `UpTrack answered with HTTP ${res.status}.`);
+  const auth: Auth = { token: body.token, name: body.user?.name ?? "", email: body.user?.email ?? email };
+  await saveAuth(auth);
+  return auth;
 }
 
-/** Checks the server address and returns who reports will come from. */
+/** Signs out: the server ends the session, and the extension forgets it either way. */
+export async function signOut(settings: Settings): Promise<void> {
+  if (settings.token) {
+    await fetch(`${settings.serverUrl}/api/extension/session`, {
+      method: "DELETE",
+      credentials: "omit",
+      headers: { Authorization: `Bearer ${settings.token}` },
+    }).catch(() => {});
+  }
+  await clearAuth();
+}
+
+export interface Who {
+  name: string;
+  email: string;
+  /** "organization" when they belong to any organization, else "personal". */
+  account: "organization" | "personal";
+  /** Where reports can go: organizations first, then the personal workspace. */
+  workspaces: { name: string; kind: "organization" | "personal" }[];
+}
+
+/** Who reports will come from, and where they can go. */
 export async function ping(settings: Settings): Promise<Who> {
   return (await (await get(settings, "/api/captures")).json()) as Who;
 }
@@ -58,11 +94,11 @@ export async function fetchProjects(settings: Settings): Promise<ReportableProje
 
 /** Uploads with XMLHttpRequest, which (unlike fetch) reports upload progress for big recordings. */
 export function upload(settings: Settings, form: FormData, onProgress: (fraction: number) => void): Promise<UploadResult> {
+  if (!settings.token) return Promise.reject(new SignInRequired("Sign in to UpTrack to report bugs."));
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open("POST", `${settings.serverUrl}/api/captures`);
-    xhr.withCredentials = true;
-    if (settings.token) xhr.setRequestHeader("Authorization", `Bearer ${settings.token}`);
+    xhr.setRequestHeader("Authorization", `Bearer ${settings.token}`);
     xhr.upload.onprogress = (e) => e.lengthComputable && onProgress(e.loaded / e.total);
     xhr.onload = () => {
       let body: { error?: string } & Partial<UploadResult> = {};
@@ -71,7 +107,8 @@ export function upload(settings: Settings, form: FormData, onProgress: (fraction
       } catch {}
       if (xhr.status === 201 && body.key) return resolve(body as UploadResult);
       const text = body.error ?? `UpTrack answered with HTTP ${xhr.status}.`;
-      reject(xhr.status === 401 ? new SignInRequired(text) : new ApiError(text));
+      if (xhr.status === 401) void clearAuth().then(() => reject(new SignInRequired(text)));
+      else reject(new ApiError(text));
     };
     xhr.onerror = () => reject(new ApiError("The upload failed. Check your connection and try again."));
     xhr.send(form);

@@ -8,6 +8,7 @@ import { signOut } from "@/server/actions/auth";
 interface Org {
   slug: string;
   name: string;
+  kind: "organization" | "personal";
 }
 
 function useDismiss(open: boolean, close: () => void) {
@@ -29,7 +30,16 @@ function useDismiss(open: boolean, close: () => void) {
 const menuItem = "block w-full px-3 py-2 text-left text-sm hover:bg-surface-2";
 
 /** Signed-in navigation. The current organization comes from the URL (/o/<slug>), else the first one. */
-export function AppNav({ user, orgs }: { user: { fullName: string; email: string }; orgs: Org[] }) {
+export function AppNav({
+  user,
+  orgs,
+  accountType,
+}: {
+  user: { fullName: string; email: string };
+  orgs: Org[];
+  /** "organization" when they belong to any organization, else "personal" (the same rule the extension uses). */
+  accountType: "organization" | "personal";
+}) {
   const pathname = usePathname();
   const slug = pathname.match(/^\/o\/([^/]+)/)?.[1];
   const current = orgs.find((o) => o.slug === slug) ?? orgs[0];
@@ -38,11 +48,13 @@ export function AppNav({ user, orgs }: { user: { fullName: string; email: string
   const orgRef = useDismiss(orgOpen, () => setOrgOpen(false));
   const userRef = useDismiss(userOpen, () => setUserOpen(false));
 
+  const personal = current?.kind === "personal";
   const links: [string, string][] = current
     ? [
-        ["Projects", `/o/${current.slug}`],
+        [personal ? "My bugs" : "Projects", `/o/${current.slug}`],
         ["Sheets", "/sheets"],
-        ["Members", `/o/${current.slug}/settings/members`],
+        // A personal workspace has no members to manage.
+        ...(personal ? [] : ([["Members", `/o/${current.slug}/settings/members`]] as [string, string][])),
         ["Extension", "/extension"],
         ["Connect agent", "/connect"],
       ]
@@ -69,9 +81,10 @@ export function AppNav({ user, orgs }: { user: { fullName: string; email: string
                   key={o.slug}
                   href={`/o/${o.slug}`}
                   onClick={() => setOrgOpen(false)}
-                  className={`${menuItem} ${o.slug === current.slug ? "font-medium" : ""}`}
+                  className={`${menuItem} flex items-center justify-between gap-2 ${o.slug === current.slug ? "font-medium" : ""}`}
                 >
-                  {o.name}
+                  <span className="truncate">{o.name}</span>
+                  {o.kind === "personal" && <span className="shrink-0 text-xs font-normal text-muted">Just you</span>}
                 </Link>
               ))}
               <div className="my-1 border-t border-line" />
@@ -117,6 +130,7 @@ export function AppNav({ user, orgs }: { user: { fullName: string; email: string
             <div className="border-b border-line px-3 py-2">
               <p className="truncate text-sm font-medium">{user.fullName}</p>
               <p className="truncate text-xs text-muted">{user.email}</p>
+              <p className="mt-1 text-xs text-muted">{accountType === "organization" ? "Organization account" : "Personal account"}</p>
             </div>
             {current && (
               <Link href={`/o/${current.slug}/settings/tokens`} onClick={() => setUserOpen(false)} className={menuItem}>

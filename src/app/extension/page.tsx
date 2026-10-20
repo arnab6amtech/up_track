@@ -42,9 +42,9 @@ export default function ExtensionPage() {
 
       <Step n={3} title="Sign in">
         <p>
-          Nothing to set up: the extension already knows this server, and reports bugs as the account you&apos;re signed
-          in to UpTrack with in this browser. If you&apos;re signed out, its menu has a{" "}
-          <span className="font-medium">Sign in</span> button. You pick the project and version for each report.
+          The extension already knows this server. Click its icon and sign in with your UpTrack email and password. If
+          you belong to an organization, you report to its projects (the ones your role lets you report to); with a
+          Personal account, bugs go to your personal workspace. You pick the project and version for each report.
         </p>
       </Step>
 

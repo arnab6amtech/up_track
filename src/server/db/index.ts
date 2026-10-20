@@ -22,8 +22,21 @@ export interface Database extends Queryable {
 // ---- PostgreSQL server (DATABASE_URL) ----
 
 async function openPostgres(connectionString: string): Promise<Database> {
-  const { Pool } = await import("pg");
-  const pool = new Pool({ connectionString, max: Number(process.env.DATABASE_POOL_SIZE ?? 10) });
+  const { Pool, types } = await import("pg");
+  // Read values back the way PGlite does, so the app behaves the same on either database.
+  const parsers: Record<number, (value: string) => unknown> = {
+    // bigint ids and byte counts: numbers rather than strings (they stay far below 2^53).
+    [types.builtins.INT8]: Number,
+    // Plain dates (release and due dates) at midnight UTC, not midnight in the server's time zone,
+    // which moves them a day when they're read back as UTC (Oct 20 in Dhaka is Oct 19 18:00 UTC).
+    [types.builtins.DATE]: (value) => new Date(`${value}T00:00:00Z`),
+    [types.builtins.INTERVAL]: (value) => value,
+  };
+  const pool = new Pool({
+    connectionString,
+    max: Number(process.env.DATABASE_POOL_SIZE ?? 10),
+    types: { getTypeParser: ((oid: number, format?: "text" | "binary") => parsers[oid] ?? types.getTypeParser(oid, format)) as typeof types.getTypeParser },
+  });
   const wrap = (q: { query: (text: string, params?: unknown[]) => Promise<{ rows: unknown[] }> }): Queryable => ({
     query: async <T>(text: string, params?: unknown[]) => (await q.query(text, params)).rows as T[],
     exec: async (text: string) => {

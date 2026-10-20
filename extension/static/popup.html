@@ -19,31 +19,23 @@
           />
         </svg>
       </button>
-      <button type="button" id="open-settings" class="btn btn-sm" hidden>Settings</button>
     </header>
 
-    <section id="setup" class="body" hidden>
-      <p class="small muted">Enter your UpTrack address. Bugs are reported as the account you're signed in to UpTrack with in this browser.</p>
-      <form id="settings-form" class="stack">
-        <div class="field">
-          <label for="server">UpTrack address</label>
-          <input id="server" class="input" placeholder="https://uptrack.yourcompany.com" autocomplete="url" required />
-        </div>
-        <div class="field">
-          <label for="token">API token <span class="muted">(optional)</span></label>
-          <input id="token" class="input mono" type="password" placeholder="upt_…" autocomplete="off" />
-          <p class="small muted">Only if you'd rather not sign in here. Create one under API tokens in UpTrack.</p>
-        </div>
-        <p id="settings-error" class="error" hidden></p>
-        <button type="submit" class="btn btn-primary" id="settings-save">Save and connect</button>
-      </form>
-    </section>
-
     <section id="signin" class="body" hidden>
-      <p class="small">Sign in to UpTrack in this browser to report bugs. Reports are filed as the account you sign in with.</p>
-      <p id="signin-reason" class="small muted" hidden></p>
-      <button type="button" class="btn btn-primary" id="signin-open">Sign in to UpTrack</button>
-      <p class="small muted">Then open this menu again. <span id="signin-host" class="mono"></span></p>
+      <p class="small">Sign in to report bugs. Reports go to your organization&rsquo;s projects, or to your personal workspace.</p>
+      <form id="signin-form" class="stack">
+        <div class="field">
+          <label for="email">Email</label>
+          <input id="email" class="input" type="email" autocomplete="email" required />
+        </div>
+        <div class="field">
+          <label for="password">Password</label>
+          <input id="password" class="input" type="password" autocomplete="current-password" required />
+        </div>
+        <p id="signin-error" class="error" hidden></p>
+        <button type="submit" class="btn btn-primary" id="signin-submit">Sign in</button>
+      </form>
+      <p class="small muted">New to UpTrack? <a href="#" id="signup-open">Create an account</a></p>
     </section>
 
     <section id="actions" class="body" hidden>
@@ -57,8 +49,13 @@
       </button>
       <p id="restricted" class="notice" hidden>Chrome doesn't allow capturing this page. Switch to the site you're testing.</p>
       <p id="action-error" class="error" hidden></p>
-      <p class="small muted foot" id="connected"></p>
-      <p id="token-note" class="notice" hidden>The API token in Settings no longer works, so your browser sign-in is used. Clear it in Settings.</p>
+      <div class="account foot">
+        <div class="account-who">
+          <p class="small" id="account-name"></p>
+          <p class="small muted" id="account-where"></p>
+        </div>
+        <button type="button" class="btn btn-sm" id="signout">Sign out</button>
+      </div>
     </section>
 
     <section id="recording" class="body" hidden>

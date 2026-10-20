@@ -1,43 +1,65 @@
+/** Where UpTrack is, and the extension's sign-in. */
 export interface Settings {
   serverUrl: string;
-  /** Optional. Without one, the extension reports as whoever is signed in to UpTrack in this browser. */
+  /** The session token from signing in to the extension; missing while signed out. */
   token?: string;
 }
 
-/** The server address UpTrack wrote into the zip it was downloaded from, if any. */
-export async function bundledServerUrl(): Promise<string> {
-  try {
-    const config = (await (await fetch(chrome.runtime.getURL("config.json"))).json()) as { serverUrl?: string };
-    return config.serverUrl ?? "";
-  } catch {
-    return "";
-  }
+/** Who the extension is signed in as, kept in the extension's own storage. */
+export interface Auth {
+  token: string;
+  name: string;
+  email: string;
 }
 
-/** Saved settings, else the address bundled with the download; null when there's no address at all. */
+const AUTH_KEY = "auth";
+
+let bundled: Promise<string> | null = null;
+
+/**
+ * UpTrack's address, built into the extension: the server writes it into the zip it serves, and a local
+ * build writes UPTRACK_URL (default http://localhost:3000). Nobody types it in.
+ */
+export function serverUrl(): Promise<string> {
+  bundled ??= fetch(chrome.runtime.getURL("config.json"))
+    .then((r) => r.json() as Promise<{ serverUrl?: string }>)
+    .then((c) => (c.serverUrl ?? "").replace(/\/+$/, ""))
+    .catch(() => "");
+  return bundled;
+}
+
+export async function getAuth(): Promise<Auth | null> {
+  const auth = (await chrome.storage.local.get(AUTH_KEY))[AUTH_KEY] as Partial<Auth> | undefined;
+  return typeof auth?.token === "string" ? (auth as Auth) : null;
+}
+
+export async function saveAuth(auth: Auth): Promise<void> {
+  await chrome.storage.local.set({ [AUTH_KEY]: auth });
+}
+
+export async function clearAuth(): Promise<void> {
+  await chrome.storage.local.remove(AUTH_KEY);
+}
+
+/** Calls back when the extension signs in or out (in the menu, or because the session expired). */
+export function onAuthChange(callback: () => void) {
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area === "local" && AUTH_KEY in changes) callback();
+  });
+}
+
+/** The address and current sign-in; null only if the build has no address in it. */
 export async function getSettings(): Promise<Settings | null> {
-  const { serverUrl, token } = await chrome.storage.local.get(["serverUrl", "token"]);
-  const url = typeof serverUrl === "string" && serverUrl ? serverUrl : await bundledServerUrl();
+  const url = await serverUrl();
   if (!url) return null;
-  return typeof token === "string" && token ? { serverUrl: url, token } : { serverUrl: url };
+  const auth = await getAuth();
+  return auth ? { serverUrl: url, token: auth.token } : { serverUrl: url };
 }
 
-export async function saveSettings(settings: Settings): Promise<void> {
-  await chrome.storage.local.set({ serverUrl: settings.serverUrl, token: settings.token ?? "" });
+/** Earlier versions kept a typed-in address and an API token; sign-in replaces both. */
+export async function forgetOldSettings(): Promise<void> {
+  await chrome.storage.local.remove(["serverUrl", "token"]);
 }
 
-/** "uptrack.example.com/" → "https://uptrack.example.com"; localhost defaults to http. */
-export function normalizeServerUrl(input: string): string | null {
-  let text = input.trim().replace(/\/+$/, "");
-  if (!text) return null;
-  if (!/^https?:\/\//i.test(text)) text = `${/^(localhost|127\.|\[::1\])/.test(text) ? "http" : "https"}://${text}`;
-  try {
-    const url = new URL(text);
-    return `${url.protocol}//${url.host}${url.pathname.replace(/\/+$/, "")}`;
-  } catch {
-    return null;
-  }
-}
-
-/** UpTrack's sign-in page. */
-export const signInUrl = (settings: Settings) => `${settings.serverUrl}/login`;
+/** UpTrack's sign-up page, for people without an account yet. */
+export const signUpUrl = (settings: Settings) => `${settings.serverUrl}/signup`;

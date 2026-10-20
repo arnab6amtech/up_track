@@ -18,7 +18,7 @@ export default function NewProjectPage({ params }: PageProps<"/o/[org]/projects/
 
 async function Content({ params }: Pick<PageProps<"/o/[org]/projects/new">, "params">) {
   const ctx = await getOrgContext((await params).org);
-  if (!ctx.isAdmin && !ctx.permissions.has("org.create_projects")) notFound();
+  if (ctx.org.kind === "personal" || (!ctx.isAdmin && !ctx.permissions.has("org.create_projects"))) notFound();
   return (
     <>
       <Link href={`/o/${ctx.org.slug}`} className="inline-block rounded-md border border-line px-3 py-1.5 text-xs font-medium hover:border-accent">

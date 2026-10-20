@@ -571,16 +571,20 @@ export async function updateBug(orgId: string, bugId: string, actorId: string, l
 
 export interface Comment {
   id: string;
+  /** The comment this one replies to; null for the start of a thread. */
+  parentId: string | null;
   authorId: string;
   authorName: string;
   body: string;
   createdAt: Date;
+  editedAt: Date | null;
 }
 
 export async function listComments(orgId: string, bugId: string): Promise<Comment[]> {
   return inOrg(orgId, (tx) =>
     tx.query<Comment>(
-      `select c.id, c.author_id as "authorId", u.full_name as "authorName", c.body, c.created_at as "createdAt"
+      `select c.id, c.parent_id as "parentId", c.author_id as "authorId", u.full_name as "authorName", c.body,
+              c.created_at as "createdAt", c.edited_at as "editedAt"
          from bug_comments c join users u on u.id = c.author_id
         where c.bug_id = $1 and c.deleted_at is null order by c.created_at`,
       [bugId],
@@ -588,12 +592,56 @@ export async function listComments(orgId: string, bugId: string): Promise<Commen
   );
 }
 
-export async function addComment(orgId: string, bugId: string, authorId: string, body: string) {
+/** Adds a comment, or a reply when parentId is given (a reply to a reply joins the same thread). */
+export async function addComment(orgId: string, bugId: string, authorId: string, body: string, parentId?: string | null) {
   await inOrg(orgId, async (tx) => {
-    await tx.query("insert into bug_comments (organization_id, bug_id, author_id, body) values ($1, $2, $3, $4)", [orgId, bugId, authorId, body.trim()]);
+    let threadId: string | null = null;
+    if (parentId) {
+      const parent = await one<{ id: string; parent_id: string | null }>(
+        tx,
+        "select id, parent_id from bug_comments where id = $1 and bug_id = $2 and deleted_at is null",
+        [parentId, bugId],
+      );
+      if (!parent) throw new UserError("That comment was deleted, so it can't be replied to.");
+      threadId = parent.parent_id ?? parent.id;
+    }
+    await tx.query("insert into bug_comments (organization_id, bug_id, author_id, body, parent_id) values ($1, $2, $3, $4, $5)", [
+      orgId,
+      bugId,
+      authorId,
+      body.trim(),
+      threadId,
+    ]);
     await tx.query("insert into bug_activity (organization_id, bug_id, actor_id, action) values ($1, $2, $3, 'commented')", [orgId, bugId, authorId]);
     await tx.query("update bugs set updated_at = now() where id = $1", [bugId]);
   });
+}
+
+/** Changes a comment's text; only its author can. */
+export async function editComment(orgId: string, bugId: string, commentId: string, authorId: string, body: string) {
+  const rows = await inOrg(orgId, (tx) =>
+    tx.query(
+      `update bug_comments set body = $5, edited_at = now()
+        where organization_id = $1 and bug_id = $2 and id = $3 and author_id = $4 and deleted_at is null returning id`,
+      [orgId, bugId, commentId, authorId, body.trim()],
+    ),
+  );
+  if (rows.length === 0) throw new UserError("You can only edit your own comments.");
+}
+
+/** Deletes a comment, and its replies when it starts a thread. Its author can, or anyone allowed to moderate. */
+export async function deleteComment(orgId: string, bugId: string, commentId: string, userId: string, canModerate: boolean) {
+  const rows = await inOrg(orgId, (tx) =>
+    tx.query(
+      `update bug_comments set deleted_at = now()
+        where organization_id = $1 and bug_id = $2 and deleted_at is null
+          and (id = $3 or parent_id = $3)
+          and ($5 or exists (select 1 from bug_comments own where own.id = $3 and own.author_id = $4))
+        returning id`,
+      [orgId, bugId, commentId, userId, canModerate],
+    ),
+  );
+  if (rows.length === 0) throw new UserError("You can only delete your own comments.");
 }
 
 export interface ActivityItem {

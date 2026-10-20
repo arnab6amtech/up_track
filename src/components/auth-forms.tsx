@@ -80,7 +80,18 @@ function AccountTypeFields({ initial = "organization", allowPersonal = true }: {
 }
 
 /** Sign-up. Someone arriving from an invitation joins that organization, so they don't pick an account type. */
-export function SignUpForm({ next, email, inviteOrg }: { next: string; email: string; inviteOrg: string | null }) {
+export function SignUpForm({
+  next,
+  email,
+  inviteOrg,
+  accountType = "organization",
+}: {
+  next: string;
+  email: string;
+  inviteOrg: string | null;
+  /** Which account type starts selected (from the homepage's plans). */
+  accountType?: AccountType;
+}) {
   const [state, action] = useActionState<ActionState, FormData>(signUp, {});
   return (
     <form action={action} className="space-y-4">
@@ -90,7 +101,7 @@ export function SignUpForm({ next, email, inviteOrg }: { next: string; email: st
           You&apos;ll join <span className="font-medium">{inviteOrg}</span> once your account is created.
         </p>
       ) : (
-        <AccountTypeFields />
+        <AccountTypeFields initial={accountType} />
       )}
       <Field label="Your name" htmlFor="fullName">
         <input id="fullName" name="fullName" autoComplete="name" required className={inputClass} />

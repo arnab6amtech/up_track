@@ -7,9 +7,24 @@ export async function AppHeaderContent() {
   const user = await getCurrentUser();
   if (!user) {
     return (
-      <Link href="/login" className="rounded-md px-2.5 py-1.5 text-xs font-medium text-muted hover:text-foreground">
-        Sign in
-      </Link>
+      <nav className="flex items-center gap-1 sm:gap-2" aria-label="Main">
+        {/* The homepage's sections. */}
+        {[
+          ["Features", "/#features"],
+          ["How it works", "/#how-it-works"],
+          ["FAQ", "/#faq"],
+        ].map(([label, href]) => (
+          <Link key={href} href={href} className="hidden rounded-md px-2.5 py-1.5 text-sm font-medium text-muted hover:text-foreground md:block">
+            {label}
+          </Link>
+        ))}
+        <Link href="/login" className="rounded-md px-2.5 py-1.5 text-sm font-medium text-muted hover:text-foreground">
+          Sign in
+        </Link>
+        <Link href="/signup" className="rounded-md bg-accent px-3.5 py-1.5 text-sm font-medium text-white hover:bg-neutral-800">
+          Create account
+        </Link>
+      </nav>
     );
   }
   const orgs = await listMyOrganizations(user.id);

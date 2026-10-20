@@ -24,5 +24,12 @@ async function Form({ searchParams }: Pick<PageProps<"/signup">, "searchParams">
   // Coming from an invitation: they join its organization instead of choosing an account type.
   const inviteToken = next.match(/^\/invite\/([^/?#]+)$/)?.[1];
   const invite = inviteToken ? await findInvitation(inviteToken) : null;
-  return <SignUpForm next={next} email={String(params.email ?? "")} inviteOrg={invite?.state === "open" ? invite.orgName : null} />;
+  return (
+    <SignUpForm
+      next={next}
+      email={String(params.email ?? "")}
+      inviteOrg={invite?.state === "open" ? invite.orgName : null}
+      accountType={params.type === "personal" ? "personal" : "organization"}
+    />
+  );
 }

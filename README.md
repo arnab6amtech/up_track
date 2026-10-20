@@ -138,7 +138,13 @@ Open the app and sign up with an Organization or a Personal account.
 UpTrack stores everything in PostgreSQL. Migrations in `db/migrations/` run automatically when the app first touches the database; `npm run db:migrate` runs them on their own. The design is described in [docs/database/design.md](docs/database/design.md).
 
 - **Embedded (default):** with no `DATABASE_URL`, UpTrack runs PostgreSQL inside the app process with [PGlite](https://pglite.dev), stored in `data/pg` (change it with `PGLITE_DIR`). There's nothing to install. Only one process can open it at a time, so stop the server before running the scripts below. This suits development and a single small server.
-- **PostgreSQL server (production):** set `DATABASE_URL=postgres://…` (PostgreSQL 18 or later). `DATABASE_POOL_SIZE` sets the connection pool size (default 10). Several app servers can share it.
+- **PostgreSQL server (production):** set `DATABASE_URL=postgres://…` (PostgreSQL 18 or later). `DATABASE_POOL_SIZE` sets the connection pool size (default 10). Several app servers can share it. Use this in production: PGlite allows a single process and connection, so it can't run several servers, deploy without downtime, or be backed up while the app runs.
+  - **Locally on macOS:** `brew install postgresql@18`, then `brew services start postgresql@18`. Create a database and a user that owns it:
+    ```sh
+    psql -d postgres -c "create role uptrack login password '…'" -c "create database uptrack owner uptrack"
+    ```
+    and set `DATABASE_URL=postgres://uptrack:…@localhost:5432/uptrack` in `.env.local`.
+  - **Moving from the embedded database:** `DATABASE_URL=postgres://… npm run db:copy-from-pglite` copies everything in `data/pg` (or `PGLITE_DIR`, or a folder given after `--`) into an empty database, then compares row counts table by table. It reads a copy of the folder, so the original is left as it was and the app can keep running; anything saved after the copy stays behind, so switch `DATABASE_URL` right after.
 
 Screenshots, recordings and API logs are files under `data/storage` (change it with `STORAGE_DIR`). Spreadsheet imports and column mappings are in `data/workbooks` (`WORKBOOKS_DIR`). All of these must be on persistent storage and backed up with the database. Serverless hosts such as Vercel discard files written at runtime, so host UpTrack on a server or container with a persistent volume.
 

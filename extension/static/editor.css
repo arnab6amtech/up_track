@@ -450,6 +450,34 @@ body.resizing .devtools {
   font-size: 13px;
 }
 
+/* Adding a platform or feature to the project without leaving the report. */
+.add-option {
+  display: grid;
+  gap: 5px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-2);
+}
+
+.add-option label {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.add-option-row {
+  display: flex;
+  gap: 6px;
+}
+
+.add-option-row .input {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 8px;
+  font-size: 13px;
+  background: var(--bg);
+}
+
 .form-foot {
   display: flex;
   flex-wrap: wrap;

@@ -1,6 +1,5 @@
 /** Human-readable names for the database's enum values. */
 
-export const SEVERITY_LABEL: Record<string, string> = { critical: "Critical", high: "High", medium: "Medium", low: "Low" };
 export const PRIORITY_LABEL: Record<string, string> = { urgent: "Urgent", high: "High", medium: "Medium", low: "Low" };
 export const RESOLUTION_LABEL: Record<string, string> = {
   fixed: "Fixed",
@@ -25,13 +24,6 @@ export const VERSION_STATUS_COLOR: Record<string, string> = {
   in_testing: "#f59e0b",
   released: "#16a34a",
   archived: "#d4d4d4",
-};
-
-export const SEVERITY_TONE: Record<string, string> = {
-  critical: "bg-red-100 text-red-800",
-  high: "bg-orange-100 text-orange-800",
-  medium: "bg-yellow-100 text-yellow-800",
-  low: "bg-zinc-100 text-zinc-600",
 };
 
 export const PRIORITY_TONE: Record<string, string> = {

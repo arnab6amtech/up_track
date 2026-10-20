@@ -1,8 +1,8 @@
 import "server-only";
 import { isApiCall, isFailed, type CaptureLog } from "../capture-types";
-import { PRIORITY_LABEL, RESOLUTION_LABEL, SEVERITY_LABEL } from "../labels";
+import { PRIORITY_LABEL, RESOLUTION_LABEL } from "../labels";
 import { canViewProject } from "@/server/access";
-import { findBugByKey, listComments, PRIORITIES, SEVERITIES, type BugDetail } from "@/server/bugs";
+import { findBugByKey, listComments, PRIORITIES, type BugDetail } from "@/server/bugs";
 import { inOrg } from "@/server/db";
 import { listProjects } from "@/server/projects";
 import { getObject } from "@/server/storage";
@@ -104,7 +104,8 @@ export async function searchTracker(caller: TokenCaller, args: TrackerSearchArgs
   if (args.assignee === "me") where.push("b.assignee_id = $2");
   else if (args.assignee === "none") where.push("b.assignee_id is null");
   else if (args.assignee) add("a.full_name ilike '%' || ? || '%'", args.assignee);
-  if (args.severity && (SEVERITIES as readonly string[]).includes(args.severity.toLowerCase())) add("b.severity = ?::bug_severity", args.severity.toLowerCase());
+  // Severity levels are the organization's own: match by name.
+  if (args.severity) add("sv.name ilike ?", args.severity);
   if (args.priority && (PRIORITIES as readonly string[]).includes(args.priority.toLowerCase())) add("b.priority = ?::bug_priority", args.priority.toLowerCase());
   if (args.query?.trim()) add("(b.search_vector @@ plainto_tsquery('simple', ?) or b.title ilike '%' || ? || '%')", args.query.trim());
 
@@ -114,6 +115,7 @@ export async function searchTracker(caller: TokenCaller, args: TrackerSearchArgs
   const from = `from bugs b
     join projects p on p.id = b.project_id
     join workflow_statuses s on s.id = b.status_id
+    join bug_severities sv on sv.id = b.severity_id
     join project_versions v on v.id = b.found_in_version_id
     left join project_components c on c.id = b.component_id
     left join project_platforms pl on pl.id = b.platform_id
@@ -121,7 +123,7 @@ export async function searchTracker(caller: TokenCaller, args: TrackerSearchArgs
   return inOrg(caller.orgId, async (tx) => {
     const rows = await tx.query<Record<string, unknown>>(
       `select p.key || '-' || b.number as id, b.title, s.name as status, s.category <> 'done' as open, b.resolution,
-              b.severity, b.priority, a.full_name as assignee, v.name as found_in, pl.name as platform, c.name as feature,
+              sv.name as severity, b.priority, a.full_name as assignee, v.name as found_in, pl.name as platform, c.name as feature,
               (select count(*)::int from bug_attachments x where x.bug_id = b.id and x.kind in ('image', 'video') and x.deleted_at is null) as references,
               exists (select 1 from bug_captures bc where bc.bug_id = b.id) as has_api_log
          ${from} where ${whereSql}
@@ -148,7 +150,7 @@ export async function getTrackerBug(caller: TokenCaller, key: string, baseUrl: s
     ["Project", bug.projectName],
     ["Status", `${bug.statusName}${bug.resolution ? ` (${RESOLUTION_LABEL[bug.resolution]})` : ""}`],
     ["Still open", bug.statusCategory === "done" ? "no" : "yes"],
-    ["Severity", SEVERITY_LABEL[bug.severity]],
+    ["Severity", bug.severityName],
     ["Priority", PRIORITY_LABEL[bug.priority]],
     ["Found in version", bug.foundInVersionName],
     ["Fixed in version", bug.fixedInVersionName],
@@ -280,11 +282,12 @@ export async function trackerSummary(caller: TokenCaller, project?: string): Pro
       platform: string | null;
       feature: string | null;
     }>(
-      `select p.key as project, s.name as status, s.category <> 'done' as open, b.severity, a.full_name as assignee,
+      `select p.key as project, s.name as status, s.category <> 'done' as open, sv.name as severity, a.full_name as assignee,
               pl.name as platform, c.name as feature
          from bugs b
          join projects p on p.id = b.project_id and p.deleted_at is null
          join workflow_statuses s on s.id = b.status_id
+         join bug_severities sv on sv.id = b.severity_id
          left join users a on a.id = b.assignee_id
          left join project_components c on c.id = b.component_id
          left join project_platforms pl on pl.id = b.platform_id

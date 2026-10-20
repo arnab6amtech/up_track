@@ -4,11 +4,9 @@ import {
   describeUserAgent,
   isFailed,
   PRIORITIES,
-  SEVERITIES,
   type CaptureLog,
   type PageInfo,
   type Priority,
-  type Severity,
   type VideoMarker,
 } from "@/lib/capture-types";
 import { newToken, sha256 } from "./auth/crypto";
@@ -16,7 +14,9 @@ import { getDb, inOrg, one, type Queryable } from "./db";
 import { UserError } from "./orgs";
 import { deleteObject, putObject } from "./storage";
 
-export { PRIORITIES, SEVERITIES, type Priority, type Severity };
+export { PRIORITIES, type Priority };
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 export const RESOLUTIONS = ["fixed", "wont_fix", "duplicate", "cannot_reproduce", "by_design", "deferred"] as const;
 
 export class ConflictError extends UserError {}
@@ -31,12 +31,13 @@ export interface WorkflowStatus {
   isInitial: boolean;
 }
 
-export async function listStatuses(orgId: string): Promise<WorkflowStatus[]> {
+/** A project's statuses, in its order. */
+export async function listStatuses(orgId: string, projectId: string): Promise<WorkflowStatus[]> {
   return inOrg(orgId, (tx) =>
     tx.query<WorkflowStatus>(
       `select id, name, category, color, is_initial as "isInitial" from workflow_statuses
-        where organization_id = $1 and archived_at is null order by position`,
-      [orgId],
+        where organization_id = $1 and project_id = $2 and archived_at is null order by position`,
+      [orgId, projectId],
     ),
   );
 }
@@ -67,9 +68,12 @@ export interface BugListItem {
   statusName: string;
   statusCategory: string;
   statusColor: string | null;
-  severity: Severity;
+  severityId: string;
+  severityName: string;
+  severityColor: string;
   priority: Priority;
   resolution: string | null;
+  assigneeId: string | null;
   assigneeName: string | null;
   versionName: string;
   componentName: string | null;
@@ -78,7 +82,7 @@ export interface BugListItem {
   /** Screenshots and recordings, oldest first, for the list's reference column. */
   media: ListMedia[];
   hasCapture: boolean;
-  /** For saving changes made in the list (the status). */
+  /** For saving changes made in the list (status, assignee). */
   lockVersion: number;
   createdAt: Date;
   updatedAt: Date;
@@ -93,6 +97,30 @@ export interface BugList {
   total: number;
   /** Bugs matching every filter except the platform, per platform (null: no platform), for the list's tabs. */
   platformCounts: { platformId: string | null; n: number }[];
+}
+
+/** Bugs per platform and status: what the project sidebar and the overview count. */
+export interface PlatformStatusCount {
+  /** Null for bugs without a platform. */
+  platformId: string | null;
+  platformName: string | null;
+  /** The platform was removed from the project; its bugs keep it. */
+  platformRemoved: boolean;
+  statusId: string;
+  n: number;
+}
+
+export async function countByPlatformAndStatus(orgId: string, projectId: string): Promise<PlatformStatusCount[]> {
+  return inOrg(orgId, (tx) =>
+    tx.query<PlatformStatusCount>(
+      `select b.platform_id as "platformId", pl.name as "platformName", pl.archived_at is not null as "platformRemoved",
+              b.status_id as "statusId", count(*)::int as n
+         from bugs b left join project_platforms pl on pl.id = b.platform_id
+        where b.project_id = $1 and b.deleted_at is null
+        group by 1, 2, 3, 4`,
+      [projectId],
+    ),
+  );
 }
 
 export async function listBugs(orgId: string, projectId: string, userId: string, f: BugFilters): Promise<BugList> {
@@ -121,7 +149,7 @@ export async function listBugs(orgId: string, projectId: string, userId: string,
   if (f.assignee === "me") add("b.assignee_id = ?::uuid", userId);
   else if (f.assignee === "none") where.push("b.assignee_id is null");
   else if (f.assignee) add("b.assignee_id = ?::uuid", f.assignee);
-  if (f.severity && (SEVERITIES as readonly string[]).includes(f.severity)) add("b.severity = ?::bug_severity", f.severity);
+  if (f.severity && UUID.test(f.severity)) add("b.severity_id = ?::uuid", f.severity);
   if (f.priority && (PRIORITIES as readonly string[]).includes(f.priority)) add("b.priority = ?::bug_priority", f.priority);
   // The tabs count bugs per platform under all the other filters.
   const tabWhere = where.join(" and ");
@@ -130,19 +158,21 @@ export async function listBugs(orgId: string, projectId: string, userId: string,
   else if (f.platform) add("b.platform_id = ?::uuid", f.platform);
 
   const order =
-    f.sort === "created" ? "b.number desc" : f.sort === "severity" ? "b.severity, b.updated_at desc" : "b.updated_at desc";
+    f.sort === "created" ? "b.number desc" : f.sort === "severity" ? "sv.position, b.updated_at desc" : "b.updated_at desc";
   const page = Math.max(1, f.page ?? 1);
   const whereSql = where.join(" and ");
 
   return inOrg(orgId, async (tx) => {
     const rows = await tx.query<Omit<BugListItem, "media">>(
       `select b.id, b.number, b.title, b.status_id as "statusId", s.name as "statusName", s.category as "statusCategory", s.color as "statusColor",
-              b.severity, b.priority, b.resolution, a.full_name as "assigneeName", v.name as "versionName", c.name as "componentName",
+              b.severity_id as "severityId", sv.name as "severityName", sv.color as "severityColor",
+              b.priority, b.resolution, b.assignee_id as "assigneeId", a.full_name as "assigneeName", v.name as "versionName", c.name as "componentName",
               b.platform_id as "platformId", pl.name as "platformName",
               exists (select 1 from bug_captures bc where bc.bug_id = b.id) as "hasCapture",
               b.lock_version as "lockVersion", b.created_at as "createdAt", b.updated_at as "updatedAt"
          from bugs b
          join workflow_statuses s on s.id = b.status_id
+         join bug_severities sv on sv.id = b.severity_id
          join project_versions v on v.id = b.found_in_version_id
          left join project_components c on c.id = b.component_id
          left join project_platforms pl on pl.id = b.platform_id
@@ -232,7 +262,9 @@ export interface BugDetail {
   statusCategory: WorkflowStatus["category"];
   statusColor: string | null;
   resolution: string | null;
-  severity: Severity;
+  severityId: string;
+  severityName: string;
+  severityColor: string;
   priority: Priority;
   foundInVersionId: string;
   foundInVersionName: string;
@@ -259,7 +291,8 @@ const DETAIL_SQL = `
   select b.id, b.organization_id as "organizationId", b.project_id as "projectId", p.key as "projectKey", p.name as "projectName",
          b.number, b.title, b.description, b.steps_to_reproduce as "stepsToReproduce", b.expected_result as "expectedResult",
          b.actual_result as "actualResult", b.environment, b.status_id as "statusId", s.name as "statusName",
-         s.category as "statusCategory", s.color as "statusColor", b.resolution, b.severity, b.priority,
+         s.category as "statusCategory", s.color as "statusColor", b.resolution,
+         b.severity_id as "severityId", sv.name as "severityName", sv.color as "severityColor", b.priority,
          b.found_in_version_id as "foundInVersionId", fv.name as "foundInVersionName",
          b.fixed_in_version_id as "fixedInVersionId", xv.name as "fixedInVersionName",
          b.component_id as "componentId", c.name as "componentName",
@@ -269,6 +302,7 @@ const DETAIL_SQL = `
     from bugs b
     join projects p on p.id = b.project_id
     join workflow_statuses s on s.id = b.status_id
+    join bug_severities sv on sv.id = b.severity_id
     join project_versions fv on fv.id = b.found_in_version_id
     left join project_versions xv on xv.id = b.fixed_in_version_id
     left join project_components c on c.id = b.component_id
@@ -340,7 +374,8 @@ export interface NewBug {
   foundInVersionId: string;
   componentId?: string | null;
   platformId?: string | null;
-  severity?: Severity;
+  /** One of the project's severity levels; its default level when missing. */
+  severityId?: string | null;
   priority?: Priority;
   assigneeId?: string | null;
   source?: "manual" | "browser_extension" | "import" | "api";
@@ -377,10 +412,10 @@ export async function createBug(orgId: string, input: NewBug): Promise<{ id: str
       const bug = await one<{ id: string; number: number }>(
         tx,
         `insert into bugs (organization_id, project_id, title, description, steps_to_reproduce, expected_result, actual_result,
-                           environment, found_in_version_id, component_id, severity, priority, reporter_id, assignee_id, source,
+                           environment, found_in_version_id, component_id, severity_id, priority, reporter_id, assignee_id, source,
                            external_ref, created_at, updated_at, platform_id)
          values ($1, $2, $3, nullif($4, ''), nullif($5, ''), nullif($6, ''), nullif($7, ''), nullif($8, ''), $9, $10,
-                 $11::bug_severity, $12::bug_priority, $13, $14, $15::bug_source, $16, coalesce($17, now()), coalesce($17, now()), $18)
+                 coalesce($11::uuid, (select id from bug_severities where project_id = $2 and is_default)), $12::bug_priority, $13, $14, $15::bug_source, $16, coalesce($17, now()), coalesce($17, now()), $18)
          returning id, number`,
         [
           orgId,
@@ -393,7 +428,7 @@ export async function createBug(orgId: string, input: NewBug): Promise<{ id: str
           input.environment?.trim() ?? "",
           input.foundInVersionId,
           input.componentId || null,
-          input.severity ?? "medium",
+          input.severityId || null,
           input.priority ?? "medium",
           input.reporterId,
           input.assigneeId || null,
@@ -480,7 +515,7 @@ export interface BugChanges {
   environment?: string | null;
   statusId?: string;
   resolution?: string | null;
-  severity?: Severity;
+  severityId?: string;
   priority?: Priority;
   assigneeId?: string | null;
   fixedInVersionId?: string | null;
@@ -497,7 +532,7 @@ const COLUMNS: Record<keyof BugChanges, { column: string; cast?: string; label: 
   environment: { column: "environment", label: "environment" },
   statusId: { column: "status_id", cast: "uuid", label: "status" },
   resolution: { column: "resolution", cast: "bug_resolution", label: "resolution" },
-  severity: { column: "severity", cast: "bug_severity", label: "severity" },
+  severityId: { column: "severity_id", cast: "uuid", label: "severity" },
   priority: { column: "priority", cast: "bug_priority", label: "priority" },
   assigneeId: { column: "assignee_id", cast: "uuid", label: "assignee" },
   fixedInVersionId: { column: "fixed_in_version_id", cast: "uuid", label: "fixed in" },
@@ -525,7 +560,7 @@ export async function updateBug(orgId: string, bugId: string, actorId: string, l
       environment: before.environment,
       statusId: before.statusId,
       resolution: before.resolution,
-      severity: before.severity,
+      severityId: before.severityId,
       priority: before.priority,
       assigneeId: before.assigneeId,
       fixedInVersionId: before.fixedInVersionId,
@@ -548,6 +583,7 @@ export async function updateBug(orgId: string, bugId: string, actorId: string, l
     const after = (await getBugById(tx, bugId))!;
     const readable: Partial<Record<keyof BugChanges, [unknown, unknown]>> = {
       statusId: [before.statusName, after.statusName],
+      severityId: [before.severityName, after.severityName],
       assigneeId: [before.assigneeName, after.assigneeName],
       fixedInVersionId: [before.fixedInVersionName, after.fixedInVersionName],
       componentId: [before.componentName, after.componentName],
@@ -780,7 +816,8 @@ export interface MyBug {
   statusName: string;
   statusColor: string | null;
   priority: Priority;
-  severity: Severity;
+  severityName: string;
+  severityColor: string;
   updatedAt: Date;
 }
 
@@ -789,10 +826,11 @@ export async function listAssignedOpenBugs(orgId: string, userId: string, limit 
   return inOrg(orgId, (tx) =>
     tx.query<MyBug>(
       `select p.key as "projectKey", p.name as "projectName", b.number, b.title, s.name as "statusName", s.color as "statusColor",
-              b.priority, b.severity, b.updated_at as "updatedAt"
+              b.priority, sv.name as "severityName", sv.color as "severityColor", b.updated_at as "updatedAt"
          from bugs b
          join projects p on p.id = b.project_id and p.deleted_at is null
          join workflow_statuses s on s.id = b.status_id
+         join bug_severities sv on sv.id = b.severity_id
         where b.organization_id = $1 and b.assignee_id = $2 and b.deleted_at is null and s.category <> 'done'
         order by b.priority, b.updated_at desc
         limit $3`,

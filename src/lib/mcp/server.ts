@@ -51,7 +51,7 @@ export function createMcpServer({ baseUrl, caller }: { baseUrl: string; caller: 
         open_only: z.boolean().optional().describe("Only bugs that aren't done yet."),
         status: z.string().optional().describe("Status name, e.g. Open, In progress, Ready for QA."),
         assignee: z.string().optional().describe('"me", "none", or part of a name.'),
-        severity: z.string().optional().describe("critical, high, medium or low."),
+        severity: z.string().optional().describe("Severity level name, e.g. Critical or High (organizations name their own)."),
         priority: z.string().optional().describe("urgent, high, medium or low."),
         query: z.string().optional().describe("Words to find in titles and descriptions."),
         limit: z.number().int().min(1).max(100).optional().describe("Default 20."),

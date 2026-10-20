@@ -92,6 +92,29 @@ export async function fetchProjects(settings: Settings): Promise<ReportableProje
   return ((await (await get(settings, "/api/captures/projects")).json()) as { projects: ReportableProject[] }).projects;
 }
 
+/** Adds a platform or feature to a project while reporting; a name it already has returns that one. */
+export async function addProjectOption(
+  settings: Settings,
+  projectId: string,
+  kind: "platform" | "feature",
+  name: string,
+): Promise<{ id: string; name: string; existed?: boolean }> {
+  if (!settings.token) throw new SignInRequired("Sign in to UpTrack to report bugs.");
+  let res: Response;
+  try {
+    res = await fetch(`${settings.serverUrl}/api/captures/options`, {
+      method: "POST",
+      credentials: "omit",
+      headers: { Authorization: `Bearer ${settings.token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ projectId, kind, name }),
+    });
+  } catch {
+    throw new ApiError(UNREACHABLE);
+  }
+  if (!res.ok) throw await failure(res);
+  return (await res.json()) as { id: string; name: string; existed?: boolean };
+}
+
 /** Uploads with XMLHttpRequest, which (unlike fetch) reports upload progress for big recordings. */
 export function upload(settings: Settings, form: FormData, onProgress: (fraction: number) => void): Promise<UploadResult> {
   if (!settings.token) return Promise.reject(new SignInRequired("Sign in to UpTrack to report bugs."));

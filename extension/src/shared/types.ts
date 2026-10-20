@@ -1,7 +1,7 @@
 import type { CaptureLog, PageInfo, VideoMarker } from "../../../src/lib/capture-types";
 
 export type { CaptureLog, ConsoleEntry, NetworkEntry, NetworkType, PageInfo, ReportableProject, VideoMarker } from "../../../src/lib/capture-types";
-export { describeUserAgent, inFilter, isApiCall, isFailed, LOAD_FAILED, NETWORK_FILTERS, PRIORITIES, SEVERITIES } from "../../../src/lib/capture-types";
+export { describeUserAgent, inFilter, isApiCall, isFailed, LOAD_FAILED, NETWORK_FILTERS, PRIORITIES } from "../../../src/lib/capture-types";
 
 /** A screenshot or recording waiting in the editor to be annotated and reported. */
 export interface Draft {

@@ -4,6 +4,7 @@ import { Suspense } from "react";
 import { ReportBugForm } from "@/components/report-bug-form";
 import { getOrgContext, getProjectAccess } from "@/server/access";
 import { listComponents, listPlatforms, listProjectMembers, listVersions } from "@/server/projects";
+import { listSeverities } from "@/server/workflow";
 
 export const metadata = { title: "Report a bug — UpTrack" };
 
@@ -23,11 +24,12 @@ async function Content({ params, searchParams }: Pick<PageProps<"/o/[org]/p/[key
   const wanted = (await searchParams).platform;
   const [ctx, access] = await Promise.all([getOrgContext(org), getProjectAccess(org, key)]);
   if (!access.permissions.has("bug.create")) notFound();
-  const [versions, platforms, components, members] = await Promise.all([
+  const [versions, platforms, components, members, severities] = await Promise.all([
     listVersions(ctx.org.id, access.project.id),
     listPlatforms(ctx.org.id, access.project.id),
     listComponents(ctx.org.id, access.project.id),
     access.permissions.has("bug.assign") ? listProjectMembers(ctx.org.id, access.project.id) : Promise.resolve([]),
+    listSeverities(ctx.org.id, access.project.id),
   ]);
   const usable = versions.filter((v) => v.status !== "archived");
   // Most bugs are found in whatever QA is testing right now.
@@ -72,6 +74,7 @@ async function Content({ params, searchParams }: Pick<PageProps<"/o/[org]/p/[key
             platforms={platforms.map((p) => ({ id: p.id, name: p.name }))}
             defaultPlatformId={platforms.find((p) => p.id === wanted)?.id}
             components={components.map((c) => ({ id: c.id, name: c.name }))}
+            severities={severities.map((s) => ({ id: s.id, name: s.name, isDefault: s.isDefault }))}
             members={members.map((m) => ({ id: m.userId, name: m.fullName }))}
           />
         </div>

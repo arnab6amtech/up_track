@@ -1,7 +1,7 @@
 // Editor tab: annotate the screenshot (or trim the recording), describe the bug and upload it to UpTrack.
 
 import { Annotator, type Tool } from "./annotate";
-import { ApiError, fetchProjects, SignInRequired, upload } from "./shared/api";
+import { addProjectOption, ApiError, fetchProjects, SignInRequired, upload } from "./shared/api";
 import { deleteDraft, getDraft } from "./shared/drafts";
 import { getSettings, onAuthChange } from "./shared/settings";
 import {
@@ -9,7 +9,6 @@ import {
   inFilter,
   isFailed,
   NETWORK_FILTERS,
-  SEVERITIES,
   type CaptureLog,
   type Draft,
   type NetworkEntry,
@@ -42,7 +41,6 @@ function formatTime(ms: number) {
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 }
 
-const capitalize = (value: string) => value[0].toUpperCase() + value.slice(1);
 
 function fillSelect(id: string, options: { value: string; label: string }[], selected: string) {
   const select = $<HTMLSelectElement>(id);
@@ -81,14 +79,25 @@ function showVersions(projectId: string, preferred: LastChoice = {}) {
     versions.map((v) => ({ value: v.id, label: `${v.name}${v.status === "in_testing" ? " (in testing)" : ""}` })),
     pick?.id ?? "",
   );
-  // Projects that cover several products (admin panel, website, app) need the platform too.
+  // Projects that cover several products (admin panel, website, app) need the platform too. Without any
+  // platforms it's optional, and the reporter can add the first one.
   const platforms = project?.platforms ?? [];
-  $("platform-field").hidden = platforms.length === 0;
   $<HTMLSelectElement>("platform").required = platforms.length > 0;
-  fillChoice("platform", platforms, "Choose a platform", preferred.platformId);
-  // Every bug names its feature; a project without any can't take reports yet.
+  if (platforms.length) fillChoice("platform", platforms, "Choose a platform", preferred.platformId);
+  else $<HTMLSelectElement>("platform").replaceChildren(new Option("No platform", "", true, true));
+  withAddOption("platform", "+ Add a platform…");
+  // Every bug names its feature; the reporter can add one the project doesn't have yet.
   const features = project?.components ?? [];
-  fillChoice("module", features, features.length ? "Choose a feature" : "No features yet", preferred.componentId);
+  fillChoice("module", features, features.length ? "Choose a feature" : "No features yet: add one", preferred.componentId);
+  withAddOption("module", "+ Add a feature…");
+  // The project's own severity levels; keep the reporter's pick when it's still one of them.
+  const levels = project?.severities ?? [];
+  const current = $<HTMLSelectElement>("severity").value;
+  fillSelect(
+    "severity",
+    levels.map((l) => ({ value: l.id, label: l.name })),
+    (levels.find((l) => l.id === current) ?? levels.find((l) => l.isDefault) ?? levels[0])?.id ?? "",
+  );
 }
 
 /** Projects in a picker, grouped by organization when the reporter belongs to several. */
@@ -141,7 +150,100 @@ async function loadProjects() {
   showVersions(projectId, last);
 }
 
-$<HTMLSelectElement>("project").addEventListener("change", (e) => showVersions((e.target as HTMLSelectElement).value));
+$<HTMLSelectElement>("project").addEventListener("change", (e) => {
+  closeAdd();
+  showVersions((e.target as HTMLSelectElement).value);
+});
+
+// ---- Adding a platform or feature while reporting ----
+
+const ADD = "__add__";
+type OptionKind = "platform" | "feature";
+const PICKER: Record<OptionKind, string> = { platform: "platform", feature: "module" };
+/** What each picker showed before "+ Add…" was chosen, to go back to. */
+const picked: Record<string, string> = {};
+let adding: OptionKind | null = null;
+
+/** The last line of a picker: opens the box for adding a new entry. */
+function withAddOption(id: string, label: string) {
+  $<HTMLSelectElement>(id).append(new Option(label, ADD));
+  picked[id] = $<HTMLSelectElement>(id).value;
+}
+
+function openAdd(kind: OptionKind) {
+  adding = kind;
+  $("add-option-label").textContent = kind === "platform" ? "New platform" : "New feature";
+  const input = $<HTMLInputElement>("add-option-name");
+  input.value = "";
+  input.placeholder = kind === "platform" ? "e.g. Vendor website" : "e.g. Checkout";
+  $("add-option-error").hidden = true;
+  $("add-option").hidden = false;
+  input.focus();
+}
+
+function closeAdd() {
+  adding = null;
+  $("add-option").hidden = true;
+}
+
+async function saveAdd() {
+  if (!adding) return;
+  const kind = adding;
+  const name = $<HTMLInputElement>("add-option-name").value.trim();
+  const error = $("add-option-error");
+  if (!name) {
+    error.textContent = "Give it a name.";
+    error.hidden = false;
+    return;
+  }
+  const button = $<HTMLButtonElement>("add-option-save");
+  button.disabled = true;
+  button.textContent = "Adding…";
+  try {
+    const settings = await getSettings();
+    if (!settings) throw new ApiError(NO_SERVER);
+    const projectId = $<HTMLSelectElement>("project").value;
+    const added = await addProjectOption(settings, projectId, kind, name);
+    // Keep the project's lists in step, then pick the new entry (other choices stay as they are).
+    const project = projects.find((p) => p.id === projectId);
+    const list = kind === "platform" ? project?.platforms : project?.components;
+    if (list && !list.some((x) => x.id === added.id)) list.push({ id: added.id, name: added.name });
+    showVersions(projectId, {
+      versionId: $<HTMLSelectElement>("version").value,
+      platformId: kind === "platform" ? added.id : $<HTMLSelectElement>("platform").value,
+      componentId: kind === "feature" ? added.id : $<HTMLSelectElement>("module").value,
+    });
+    closeAdd();
+  } catch (err) {
+    error.textContent = err instanceof SignInRequired ? SIGN_IN : err instanceof ApiError ? err.message : "Couldn't add it. Try again.";
+    error.hidden = false;
+  } finally {
+    button.disabled = false;
+    button.textContent = "Add";
+  }
+}
+
+for (const kind of ["platform", "feature"] as const) {
+  const id = PICKER[kind];
+  $<HTMLSelectElement>(id).addEventListener("change", (e) => {
+    const select = e.target as HTMLSelectElement;
+    if (select.value !== ADD) {
+      picked[id] = select.value;
+      return;
+    }
+    select.value = picked[id] ?? "";
+    openAdd(kind);
+  });
+}
+$("add-option-save").addEventListener("click", () => void saveAdd());
+$("add-option-cancel").addEventListener("click", closeAdd);
+$("add-option-name").addEventListener("keydown", (e) => {
+  // Enter adds the entry rather than sending the report.
+  if (e.key === "Enter") {
+    e.preventDefault();
+    void saveAdd();
+  } else if (e.key === "Escape") closeAdd();
+});
 // Coming back after being added to a project in another tab: try again.
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible" && !projectsReady) void loadProjects();
@@ -915,7 +1017,7 @@ $("form").addEventListener("submit", async (e) => {
       versionId: $<HTMLSelectElement>("version").value,
       platformId: $<HTMLSelectElement>("platform").value || undefined,
       componentId: $<HTMLSelectElement>("module").value,
-      severity: $<HTMLSelectElement>("severity").value,
+      severityId: $<HTMLSelectElement>("severity").value || undefined,
       // Page details can be missing when the tab closed before a recording finished.
       page: draft.page ?? {
         url: "unknown",
@@ -1071,7 +1173,6 @@ function setUpResizer() {
 
 (async () => {
   setUpResizer();
-  fillSelect("severity", SEVERITIES.map((v) => ({ value: v, label: capitalize(v) })), "medium");
   const projectsLoaded = loadProjects();
   const params = new URLSearchParams(location.search);
   const problem = params.get("error");

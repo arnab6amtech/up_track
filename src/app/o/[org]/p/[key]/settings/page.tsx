@@ -1,7 +1,7 @@
 import Link from "next/link";
-import { notFound } from "next/navigation";
 import { Suspense } from "react";
 import { ConfirmButton } from "@/components/confirm-button";
+import { Avatar } from "@/components/avatar";
 import { BugTabs, type BugTab } from "@/components/bug-tabs";
 import {
   AddComponentForm,
@@ -19,6 +19,8 @@ import { getOrgContext, getProjectAccess } from "@/server/access";
 import { archiveComponentAction, archivePlatformAction, removeProjectMemberAction } from "@/server/actions/project";
 import { listMembers, listRoles } from "@/server/orgs";
 import { listComponents, listPlatforms, listProjectMembers, listVersions } from "@/server/projects";
+import { listWorkflow } from "@/server/workflow";
+import { AddWorkflowEntry, WorkflowRow } from "@/components/workflow-forms";
 
 export const metadata = { title: "Project settings — UpTrack" };
 
@@ -51,38 +53,20 @@ const card = "rounded-xl border border-line bg-surface";
 const formatDate = (day: string) =>
   new Date(`${day}T00:00:00Z`).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });
 
-const AVATAR_COLORS = ["#ea580c", "#0891b2", "#7c3aed", "#16a34a", "#db2777", "#2563eb", "#ca8a04", "#475569"];
-
-/** Initials on a colour of the person's own, the same as next to their comments. */
-function Avatar({ id, name }: { id: string; name: string }) {
-  let hash = 0;
-  for (const ch of id) hash = (hash * 31 + ch.charCodeAt(0)) | 0;
-  const initials = name.trim().split(/\s+/).slice(0, 2).map((w) => w[0]?.toUpperCase() ?? "").join("") || "?";
-  return (
-    <span
-      className="grid size-9 shrink-0 place-items-center rounded-full text-xs font-semibold text-white"
-      style={{ background: AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length] }}
-      aria-hidden
-    >
-      {initials}
-    </span>
-  );
-}
-
 async function Settings({ params }: Pick<PageProps<"/o/[org]/p/[key]/settings">, "params">) {
   const { org, key } = await params;
   const [ctx, access] = await Promise.all([getOrgContext(org), getProjectAccess(org, key)]);
   const canManage = access.permissions.has("project.manage");
   const canVersions = access.permissions.has("project.manage_versions");
-  if (!canManage && !canVersions) notFound();
   const projectId = access.project.id;
-  const [versions, platforms, components, members, orgMembers, projectRoles] = await Promise.all([
+  const [versions, platforms, components, members, orgMembers, projectRoles, workflow] = await Promise.all([
     listVersions(ctx.org.id, projectId),
     listPlatforms(ctx.org.id, projectId),
     listComponents(ctx.org.id, projectId),
     listProjectMembers(ctx.org.id, projectId),
     canManage ? listMembers(ctx.org.id) : Promise.resolve([]),
     listRoles(ctx.org.id, "project"),
+    listWorkflow(ctx.org.id, projectId),
   ]);
   const ids = { org, project: access.project.key };
   const onProject = new Set(members.map((m) => m.userId));
@@ -202,7 +186,7 @@ async function Settings({ params }: Pick<PageProps<"/o/[org]/p/[key]/settings">,
         <ul className="divide-y divide-line">
           {members.map((m) => (
             <li key={m.userId} className="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3">
-              <Avatar id={m.userId} name={m.fullName} />
+              <Avatar id={m.userId} name={m.fullName} size="lg" />
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm font-medium">
                   {m.fullName} {m.userId === ctx.user.id && <span className="font-normal text-muted">(you)</span>}
@@ -225,10 +209,68 @@ async function Settings({ params }: Pick<PageProps<"/o/[org]/p/[key]/settings">,
     </Section>
   );
 
-  // Version managers who don't run the project only see versions.
+  const statusList = (
+    <Section
+      title="Statuses"
+      hint={
+        <>
+          Where a bug is in its life, in this project. Each status means <span className="font-medium text-foreground">To do</span>,{" "}
+          <span className="font-medium text-foreground">In progress</span>, <span className="font-medium text-foreground">In review</span> or{" "}
+          <span className="font-medium text-foreground">Done</span>: Done statuses close a bug (SQA engineers and managers), the others count as
+          open. New bugs start in the default. Anyone on the project can change these.
+        </>
+      }
+    >
+      <div className={`${card} overflow-hidden`}>
+        <ul className="divide-y divide-line">
+          {workflow.statuses.map((st, i) => (
+            <WorkflowRow
+              key={`${st.id}-${st.name}-${st.color}-${st.category}`}
+              org={org}
+              project={access.project.key}
+              list="status"
+              entry={st}
+              first={i === 0}
+              last={i === workflow.statuses.length - 1}
+            />
+          ))}
+        </ul>
+        <AddWorkflowEntry org={org} project={access.project.key} list="status" used={workflow.statuses.map((st) => st.color.toLowerCase())} />
+      </div>
+    </Section>
+  );
+
+  const severityList = (
+    <Section
+      title="Severity"
+      hint="How bad a bug's impact is, most severe first: sorting by severity follows this order. New bugs get the default level unless the reporter picks another. Anyone on the project can change these."
+    >
+      <div className={`${card} overflow-hidden`}>
+        <ul className="divide-y divide-line">
+          {workflow.severities.map((sv, i) => (
+            <WorkflowRow
+              key={`${sv.id}-${sv.name}-${sv.color}`}
+              org={org}
+              project={access.project.key}
+              list="severity"
+              entry={sv}
+              first={i === 0}
+              last={i === workflow.severities.length - 1}
+            />
+          ))}
+        </ul>
+        <AddWorkflowEntry org={org} project={access.project.key} list="severity" used={workflow.severities.map((sv) => sv.color.toLowerCase())} />
+      </div>
+    </Section>
+  );
+
+  // Everyone on the project manages its statuses and severity; the rest is for managers (versions for
+  // version managers, read-only for others).
   const tabs: BugTab[] = [
     ...(canManage ? [{ id: "general", label: "General", content: general }] : []),
     { id: "versions", label: "Versions", count: versions.length, content: versionList },
+    { id: "statuses", label: "Statuses", count: workflow.statuses.length, content: statusList },
+    { id: "severity", label: "Severity", count: workflow.severities.length, content: severityList },
     ...(canManage
       ? [
           { id: "platforms", label: "Platforms", count: platforms.length, content: platformList },

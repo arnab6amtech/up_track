@@ -10,9 +10,10 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { parseArgs } from "node:util";
 import type { CaptureLog, PageInfo } from "@/lib/capture-types";
-import { createBug, createShareLink, type Priority, type Severity } from "@/server/bugs";
+import { createBug, createShareLink, type Priority } from "@/server/bugs";
 import { getDb, one } from "@/server/db";
 import { createComponent } from "@/server/projects";
+import { listSeverities } from "@/server/workflow";
 
 interface OldCapture {
   id: string;
@@ -72,7 +73,9 @@ const members = await db.query<{ id: string; full_name: string; email: string }>
 const fallback = values.reporter ? members.find((m) => m.email.toLowerCase() === values.reporter!.toLowerCase()) : undefined;
 if (values.reporter && !fallback) exit(`${values.reporter} isn't an active member of ${project.key}. Add them to the project first.`);
 
-const severity = (v: string): Severity => (["critical", "high", "medium", "low"].includes(v.toLowerCase()) ? (v.toLowerCase() as Severity) : "medium");
+// Old captures named a level ("high"); match it to the project's levels by name, else the default level.
+const severities = await listSeverities(org.id, project.id);
+const severity = (v: string): string | null => severities.find((s) => s.name.toLowerCase() === v.trim().toLowerCase())?.id ?? null;
 const priority = (v: string): Priority => {
   const p = v.toLowerCase();
   return p === "urgent" || p === "high" || p === "low" ? p : "medium";
@@ -129,7 +132,7 @@ for (const c of captures) {
     description: c.description,
     foundInVersionId: version.id,
     componentId,
-    severity: severity(c.severity),
+    severityId: severity(c.severity),
     priority: priority(c.priority),
     source: "browser_extension",
     externalRef: ref,

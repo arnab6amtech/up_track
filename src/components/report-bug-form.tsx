@@ -3,7 +3,7 @@
 import { useActionState, useState } from "react";
 import { reportBugAction } from "@/server/actions/project";
 import type { ActionState } from "@/server/actions/result";
-import { PRIORITY_LABEL, SEVERITY_LABEL, VERSION_STATUS_LABEL } from "@/lib/labels";
+import { PRIORITY_LABEL, VERSION_STATUS_LABEL } from "@/lib/labels";
 import { Field, FormMessage, inputClass, selectClass, SubmitButton } from "./form";
 
 interface Option {
@@ -19,6 +19,7 @@ export function ReportBugForm({
   platforms,
   defaultPlatformId,
   components,
+  severities,
   members,
 }: {
   org: string;
@@ -29,6 +30,8 @@ export function ReportBugForm({
   platforms: Option[];
   defaultPlatformId?: string;
   components: Option[];
+  /** The organization's severity levels, most severe first. */
+  severities: (Option & { isDefault: boolean })[];
   /** Empty when the reporter can't assign bugs. */
   members: Option[];
 }) {
@@ -82,10 +85,10 @@ export function ReportBugForm({
           </select>
         </Field>
         <Field label="Severity" htmlFor="severity" hint="How bad the impact is.">
-          <select id="severity" name="severity" defaultValue="medium" className={selectClass}>
-            {Object.entries(SEVERITY_LABEL).map(([v, l]) => (
-              <option key={v} value={v}>
-                {l}
+          <select id="severity" name="severityId" defaultValue={severities.find((s) => s.isDefault)?.id} className={selectClass}>
+            {severities.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.name}
               </option>
             ))}
           </select>

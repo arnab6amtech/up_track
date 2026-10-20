@@ -35,8 +35,15 @@ export async function listReportableProjects(
         where project_id = any($1::uuid[]) and archived_at is null order by lower(name)`,
       [ids],
     );
+    // Each project's own severity levels.
+    const severities = await tx.query<{ project_id: string; id: string; name: string; color: string; isDefault: boolean }>(
+      `select project_id, id, name, color, is_default as "isDefault" from bug_severities
+        where project_id = any($1::uuid[]) and archived_at is null order by position`,
+      [ids],
+    );
     return projects.map((p) => ({
       ...p,
+      severities: severities.filter((s) => s.project_id === p.id).map(({ id, name, color, isDefault }) => ({ id, name, color, isDefault })),
       organization: { slug: org.slug, name: org.name },
       versions: versions.filter((v) => v.project_id === p.id).map(({ id, name, status }) => ({ id, name, status })),
       platforms: platforms.filter((pl) => pl.project_id === p.id).map(({ id, name }) => ({ id, name })),

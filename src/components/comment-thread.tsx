@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, useSyncExternalStore, useTransition } from "react";
 import { addCommentAction, deleteCommentAction, editCommentAction } from "@/server/actions/project";
 import type { ActionState } from "@/server/actions/result";
+import { Avatar } from "./avatar";
 import { RichText } from "./rich-text";
 
 export interface ThreadComment {
@@ -349,30 +350,6 @@ function useCommentAction(action: (prev: ActionState, form: FormData) => Promise
     });
   };
   return { pending, error, run };
-}
-
-const AVATAR_COLORS = ["#ea580c", "#0891b2", "#7c3aed", "#16a34a", "#db2777", "#2563eb", "#ca8a04", "#475569"];
-
-/** A person's initials on a colour of their own (the same colour every time they appear). */
-function Avatar({ id, name }: { id: string; name: string }) {
-  let hash = 0;
-  for (const ch of id) hash = (hash * 31 + ch.charCodeAt(0)) | 0;
-  const initials =
-    name
-      .trim()
-      .split(/\s+/)
-      .slice(0, 2)
-      .map((w) => w[0]?.toUpperCase() ?? "")
-      .join("") || "?";
-  return (
-    <span
-      className="relative grid size-8 shrink-0 place-items-center rounded-full text-xs font-semibold text-white"
-      style={{ background: AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length] }}
-      aria-hidden
-    >
-      {initials}
-    </span>
-  );
 }
 
 // The clock ticks once a minute, so "2 minutes ago" keeps up while the page is open.

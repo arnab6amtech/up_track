@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { NETWORK_TYPES, PRIORITIES, SEVERITIES, type ReportableProject } from "@/lib/capture-types";
+import { NETWORK_TYPES, PRIORITIES, type ReportableProject } from "@/lib/capture-types";
 import { publicOrigin } from "@/lib/origin";
 import { createBug, createShareLink } from "@/server/bugs";
 import { listReportableProjects } from "@/server/reportable";
@@ -28,7 +28,9 @@ const metaSchema = z.object({
   componentId: z.string().uuid().optional().or(z.literal("")),
   title: z.string().trim().min(1, "Give the bug a title.").max(300),
   description: str(20_000).optional(),
-  severity: z.enum(SEVERITIES).optional(),
+  severityId: z.string().uuid().optional().or(z.literal("")),
+  /** Extensions from before severity levels became the organization's own send a name ("high"). */
+  severity: str(50).optional(),
   priority: z.enum(PRIORITIES).optional(),
   page: z.object({
     url: str(8000),
@@ -175,7 +177,8 @@ export async function POST(request: Request) {
     foundInVersionId: meta.versionId,
     componentId: meta.componentId || null,
     platformId: meta.platformId || null,
-    severity: meta.severity,
+    // The project's level if it's one of its own (by id, or an older extension's name), else its default.
+    severityId: project.severities.find((s) => s.id === meta.severityId || s.name.toLowerCase() === meta.severity?.toLowerCase())?.id ?? null,
     priority: meta.priority,
     source: "browser_extension",
     attachments: [

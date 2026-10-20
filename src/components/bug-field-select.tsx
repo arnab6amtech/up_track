@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { updateBugAction } from "@/server/actions/project";
+import { severityStyle } from "./tracker-badges";
 
 /** Identifies the bug a change applies to; the lock version stops it overwriting someone else's edit. */
 export interface BugRef {
@@ -48,19 +49,19 @@ export const Chevron = ({ className = "" }: { className?: string }) => (
 );
 
 interface Props extends BugRef {
-  /** The form field updateBugAction reads, e.g. "severity" or "assigneeId". */
+  /** The form field updateBugAction reads, e.g. "severityId" or "assigneeId". */
   field: string;
   value: string;
   options: { value: string; label: string }[];
   label: string;
   /** "pill" for the badges under the title; "inline" for the values in the details list. */
   variant: "pill" | "inline";
-  /** Pill colors per value, e.g. the severity tones. */
-  tones?: Record<string, string>;
+  /** Pill colours per value, e.g. the severity levels' colours. */
+  colors?: Record<string, string>;
 }
 
 /** One field of a bug, changed in place: picking a value saves it. */
-export function BugFieldSelect({ field, value: stored, options, label, variant, tones, ...ref }: Props) {
+export function BugFieldSelect({ field, value: stored, options, label, variant, colors, ...ref }: Props) {
   const [value, setValue] = useState(stored);
   const { pending, error, save } = useBugSave(ref);
 
@@ -72,7 +73,7 @@ export function BugFieldSelect({ field, value: stored, options, label, variant, 
 
   const look =
     variant === "pill"
-      ? `rounded-full py-0.5 pl-2.5 pr-6 text-xs font-medium ${tones?.[value] ?? "bg-surface-2"} border border-transparent hover:border-line`
+      ? `rounded-full py-0.5 pl-2.5 pr-6 text-xs font-medium ${colors?.[value] ? "" : "bg-surface-2"} border border-transparent hover:border-line`
       : "rounded-md px-1.5 py-0.5 text-sm hover:bg-surface-2";
 
   // The chosen value is plain text, so it sizes itself in the page's font; an invisible select on top
@@ -83,6 +84,7 @@ export function BugFieldSelect({ field, value: stored, options, label, variant, 
     <span className={`inline-block max-w-full align-middle ${variant === "inline" ? "relative -left-1.5" : ""}`}>
       <span
         title={label}
+        style={variant === "pill" && colors?.[value] ? severityStyle(colors[value]) : undefined}
         className={`relative inline-flex max-w-full cursor-pointer items-center transition has-[select:focus-visible]:ring-2 has-[select:focus-visible]:ring-accent/20 ${pending ? "cursor-wait opacity-60" : ""} ${look}`}
       >
         <span className="truncate">{options.find((o) => o.value === value)?.label ?? ""}</span>

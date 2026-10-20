@@ -14,14 +14,13 @@ import {
   PRIORITIES,
   RESOLUTIONS,
   revokeShareLink,
-  SEVERITIES,
   updateBug,
   type BugChanges,
   type NewAttachment,
   type Priority,
-  type Severity,
 } from "../bugs";
 import { getDb, one } from "../db";
+import { validSeverity } from "../workflow";
 import { UserError } from "../orgs";
 import {
   archiveComponent,
@@ -111,7 +110,7 @@ export async function reportBugAction(_prev: ActionState, form: FormData): Promi
       foundInVersionId: versionId,
       componentId,
       platformId: platformId || null,
-      severity: oneOf(SEVERITIES, text(form, "severity")) ?? "medium",
+      severityId: await validSeverity(ctx.org.id, access.project.id, text(form, "severityId")),
       priority: oneOf(PRIORITIES, text(form, "priority")) ?? "medium",
       assigneeId: assigneeId || null,
       attachments: await readUploads(form),
@@ -145,7 +144,7 @@ export async function updateBugAction(_prev: ActionState, form: FormData): Promi
     const statusId = text(form, "statusId");
     if (statusId && statusId !== current.status_id) {
       assertCan(p, "bug.change_status");
-      const target = (await listStatuses(ctx.org.id)).find((s) => s.id === statusId);
+      const target = (await listStatuses(ctx.org.id, access.project.id)).find((s) => s.id === statusId);
       if (!target) throw new UserError("Pick a status.");
       // Closing a bug is the tester's call: it needs the verify permission (SQA engineers and managers).
       if (target.category === "done") assertCan(p, "bug.verify");
@@ -164,7 +163,7 @@ export async function updateBugAction(_prev: ActionState, form: FormData): Promi
     }
 
     const editable: [keyof BugChanges, string][] = [
-      ["severity", "severity"],
+      ["severityId", "severityId"],
       ["priority", "priority"],
       ["fixedInVersionId", "fixedInVersionId"],
       ["componentId", "componentId"],
@@ -179,7 +178,10 @@ export async function updateBugAction(_prev: ActionState, form: FormData): Promi
     for (const [key, field] of editable) {
       if (!form.has(field)) continue;
       const value = text(form, field);
-      if (key === "severity") changes.severity = oneOf(SEVERITIES, value) as Severity | undefined;
+      if (key === "severityId") {
+        if (!(await validSeverity(ctx.org.id, access.project.id, value))) throw new UserError("That severity level was removed. Pick another.");
+        changes.severityId = value;
+      }
       else if (key === "priority") changes.priority = oneOf(PRIORITIES, value) as Priority | undefined;
       else if (key === "title") changes.title = value || undefined;
       else (changes as Record<string, string | null>)[key] = value || null;

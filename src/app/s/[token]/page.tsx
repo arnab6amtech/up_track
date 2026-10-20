@@ -49,7 +49,7 @@ async function SharedBug({ params }: Pick<PageProps<"/s/[token]">, "params">) {
             <h1 className="text-lg font-semibold leading-snug tracking-tight sm:text-xl">{bug.title}</h1>
             <div className="flex flex-wrap gap-2">
               <StatusPill name={bug.resolution ? `${bug.statusName} · ${RESOLUTION_LABEL[bug.resolution]}` : bug.statusName} color={bug.statusColor} />
-              <SeverityBadge value={bug.severity} />
+              <SeverityBadge name={bug.severityName} color={bug.severityColor} />
               <PriorityBadge value={bug.priority} />
             </div>
             <p className="text-sm text-muted">

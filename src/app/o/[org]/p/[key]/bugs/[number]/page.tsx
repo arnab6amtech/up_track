@@ -13,9 +13,10 @@ import { LocalTime } from "@/components/local-time";
 import { MediaGallery } from "@/components/media-gallery";
 import { StatusSelect } from "@/components/status-select";
 import { SeverityBadge, StatusPill } from "@/components/tracker-badges";
-import { PRIORITY_LABEL, RESOLUTION_LABEL, SEVERITY_LABEL, SEVERITY_TONE } from "@/lib/labels";
+import { PRIORITY_LABEL, RESOLUTION_LABEL } from "@/lib/labels";
 import { getOrgContext, getProjectAccess } from "@/server/access";
 import { revokeShareLinkAction } from "@/server/actions/project";
+import { listSeverities } from "@/server/workflow";
 import { getBug, listActivity, listComments, listShareLinks, listStatuses, type ActivityItem } from "@/server/bugs";
 import { listComponents, listPlatforms, listProjectMembers, listVersions } from "@/server/projects";
 
@@ -32,7 +33,6 @@ const iso = (d: Date | string) => new Date(d).toISOString();
 function describeValue(field: string | null, value: unknown): string {
   if (value === null || value === undefined || value === "") return "none";
   const v = String(value);
-  if (field === "severity") return SEVERITY_LABEL[v] ?? v;
   if (field === "priority") return PRIORITY_LABEL[v] ?? v;
   if (field === "resolution") return RESOLUTION_LABEL[v] ?? v;
   return v.length > 60 ? `${v.slice(0, 60)}…` : v;
@@ -53,8 +53,9 @@ async function Bug({ params }: Pick<PageProps<"/o/[org]/p/[key]/bugs/[number]">,
   const bug = /^\d+$/.test(number) ? await getBug(ctx.org.id, access.project.id, Number(number)) : null;
   if (!bug) notFound();
   const p = access.permissions;
-  const [statuses, versions, platforms, components, members, comments, activity, shareLinks] = await Promise.all([
-    listStatuses(ctx.org.id),
+  const [statuses, severities, versions, platforms, components, members, comments, activity, shareLinks] = await Promise.all([
+    listStatuses(ctx.org.id, access.project.id),
+    listSeverities(ctx.org.id, access.project.id),
     listVersions(ctx.org.id, access.project.id),
     listPlatforms(ctx.org.id, access.project.id),
     listComponents(ctx.org.id, access.project.id),
@@ -70,10 +71,15 @@ async function Bug({ params }: Pick<PageProps<"/o/[org]/p/[key]/bugs/[number]">,
   const canEdit = p.has("bug.edit");
   const canAssign = p.has("bug.assign");
   // Each field is changed in place. They remount after a save (keyed by lock version) to show the stored value.
-  const field = (name: string, label: string, value: string, options: { value: string; label: string }[], variant: "pill" | "inline", tones?: Record<string, string>) => (
-    <BugFieldSelect key={`${name}-${bug.lockVersion}`} {...editor} field={name} label={label} value={value} options={options} variant={variant} tones={tones} />
+  const field = (name: string, label: string, value: string, options: { value: string; label: string }[], variant: "pill" | "inline", colors?: Record<string, string>) => (
+    <BugFieldSelect key={`${name}-${bug.lockVersion}`} {...editor} field={name} label={label} value={value} options={options} variant={variant} colors={colors} />
   );
-  const labelled = (labels: Record<string, string>) => Object.entries(labels).map(([value, label]) => ({ value, label }));
+  // The organization's severity levels; a level since removed still shows on the bugs that have it.
+  const severityOptions = [
+    ...severities.map((s) => ({ value: s.id, label: s.name })),
+    ...(severities.some((s) => s.id === bug.severityId) ? [] : [{ value: bug.severityId, label: bug.severityName }]),
+  ];
+  const severityColors = Object.fromEntries([...severities.map((s) => [s.id, s.color]), [bug.severityId, bug.severityColor]]);
   // Features and platforms that were removed can't be picked any more, but a bug that has one still shows it.
   const withCurrent = (list: { id: string; name: string }[], id: string | null, name: string | null, removed: string) => [
     ...(id ? [] : [{ value: "", label: "None" }]),
@@ -122,7 +128,11 @@ async function Bug({ params }: Pick<PageProps<"/o/[org]/p/[key]/bugs/[number]">,
               ) : (
                 <StatusPill name={bug.resolution ? `${bug.statusName} · ${RESOLUTION_LABEL[bug.resolution]}` : bug.statusName} color={bug.statusColor} />
               )}
-              {canEdit ? field("severity", "Severity", bug.severity, labelled(SEVERITY_LABEL), "pill", SEVERITY_TONE) : <SeverityBadge value={bug.severity} />}
+              {canEdit ? (
+                field("severityId", "Severity", bug.severityId, severityOptions, "pill", severityColors)
+              ) : (
+                <SeverityBadge name={bug.severityName} color={bug.severityColor} />
+              )}
             </div>
             <dl className="grid gap-x-6 gap-y-2 pt-1 text-sm sm:grid-cols-2">
               {(

@@ -111,7 +111,8 @@ export interface CaptureUploadMeta {
   componentId?: string;
   title: string;
   description?: string;
-  severity?: Severity;
+  /** One of the project's severity levels (ReportableProject.severities); its default when missing. */
+  severityId?: string;
   priority?: Priority;
   page: PageInfo;
   media: {
@@ -136,14 +137,14 @@ export interface ReportableProject {
   /** Empty when the project doesn't split into platforms. */
   platforms: { id: string; name: string }[];
   components: { id: string; name: string }[];
+  /** The project's severity levels, most severe first; isDefault marks the one new bugs get. */
+  severities: { id: string; name: string; color: string; isDefault: boolean }[];
 }
 
 export const isFailed = (e: NetworkEntry) =>
   Boolean(e.error) || e.status >= 400 || (e.status === 0 && (e.type === "fetch" || e.type === "xhr"));
 
-export const SEVERITIES = ["critical", "high", "medium", "low"] as const;
 export const PRIORITIES = ["urgent", "high", "medium", "low"] as const;
-export type Severity = (typeof SEVERITIES)[number];
 export type Priority = (typeof PRIORITIES)[number];
 
 const BROWSERS: [string, RegExp][] = [

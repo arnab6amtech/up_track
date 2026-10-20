@@ -98,7 +98,7 @@
               <label for="version">Found in version</label>
               <select id="version" class="input" required></select>
             </div>
-            <div class="field" id="platform-field" hidden>
+            <div class="field" id="platform-field">
               <label for="platform">Platform</label>
               <select id="platform" class="input"></select>
             </div>
@@ -110,6 +110,16 @@
               <label for="severity">Severity</label>
               <select id="severity" class="input"></select>
             </div>
+          </div>
+          <!-- Opened by "+ Add a platform…" or "+ Add a feature…" in those pickers. -->
+          <div class="add-option" id="add-option" hidden>
+            <label for="add-option-name" id="add-option-label">New platform</label>
+            <div class="add-option-row">
+              <input id="add-option-name" class="input" maxlength="100" autocomplete="off" />
+              <button type="button" class="btn btn-sm btn-primary" id="add-option-save">Add</button>
+              <button type="button" class="btn btn-sm" id="add-option-cancel">Cancel</button>
+            </div>
+            <p class="error" id="add-option-error" hidden></p>
           </div>
           <p id="projects-error" class="notice" hidden></p>
           <div class="form-foot">

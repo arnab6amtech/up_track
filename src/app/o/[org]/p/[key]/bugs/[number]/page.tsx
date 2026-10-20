@@ -2,7 +2,8 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Suspense } from "react";
 import { CopyFixChip } from "@/components/agent-command";
-import { CommentForm, CreateShareLink } from "@/components/bug-forms";
+import { CreateShareLink } from "@/components/bug-forms";
+import { CommentThread } from "@/components/comment-thread";
 import { BugFieldSelect } from "@/components/bug-field-select";
 import { BugTextSections } from "@/components/bug-text";
 import { CapturedPage, CaptureLog, mediaLinks } from "@/components/capture-details";
@@ -10,7 +11,6 @@ import { BugTabs } from "@/components/bug-tabs";
 import { ConfirmButton } from "@/components/confirm-button";
 import { LocalTime } from "@/components/local-time";
 import { MediaGallery } from "@/components/media-gallery";
-import { RichText } from "@/components/rich-text";
 import { StatusSelect } from "@/components/status-select";
 import { SeverityBadge, StatusPill } from "@/components/tracker-badges";
 import { PRIORITY_LABEL, RESOLUTION_LABEL, SEVERITY_LABEL, SEVERITY_TONE } from "@/lib/labels";
@@ -203,23 +203,15 @@ async function Bug({ params }: Pick<PageProps<"/o/[org]/p/[key]/bugs/[number]">,
                 label: "Comments",
                 count: comments.length,
                 content: (
-                  <div className="space-y-3">
-                    {comments.length === 0 ? (
-                      <p className="text-sm text-muted">No comments yet.</p>
-                    ) : (
-                      <ul className="space-y-3">
-                        {comments.map((c) => (
-                          <li key={c.id} className="rounded-xl border border-line bg-surface p-3">
-                            <p className="mb-1.5 text-xs text-muted">
-                              <span className="font-medium text-foreground">{c.authorName}</span> · <LocalTime iso={iso(c.createdAt)} />
-                            </p>
-                            <RichText text={c.body} />
-                          </li>
-                        ))}
-                      </ul>
-                    )}
-                    {p.has("bug.comment") && <CommentForm org={org} project={bug.projectKey} bugId={bug.id} />}
-                  </div>
+                  <CommentThread
+                    org={org}
+                    project={bug.projectKey}
+                    bugId={bug.id}
+                    comments={comments.map((c) => ({ ...c, createdAt: iso(c.createdAt), editedAt: c.editedAt ? iso(c.editedAt) : null }))}
+                    me={{ id: ctx.user.id, name: ctx.user.fullName }}
+                    canComment={p.has("bug.comment")}
+                    canModerate={p.has("project.manage")}
+                  />
                 ),
               },
               {

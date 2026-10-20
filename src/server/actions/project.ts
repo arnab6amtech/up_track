@@ -6,6 +6,8 @@ import { publicOrigin } from "@/lib/origin";
 import { assertCan, getOrgContext, getProjectAccess } from "../access";
 import {
   addComment,
+  deleteComment,
+  editComment,
   createBug,
   createShareLink,
   listStatuses,
@@ -202,10 +204,50 @@ export async function addCommentAction(_prev: ActionState, form: FormData): Prom
     assertCan(access.permissions, "bug.comment");
     const body = text(form, "body");
     if (!body) throw new UserError("Write something first.");
-    await addComment(ctx.org.id, text(form, "bugId"), ctx.user.id, body);
+    const bugId = await bugInProject(ctx.org.id, access.project.id, text(form, "bugId"));
+    await addComment(ctx.org.id, bugId, ctx.user.id, body, text(form, "parentId") || null);
     refresh();
     // A fresh value each time lets the form reset itself after posting.
     return { success: "posted", data: { postedAt: String(Date.now()) } };
+  });
+}
+
+/** The bug's id, after checking it belongs to the project the request names. */
+async function bugInProject(orgId: string, projectId: string, bugId: string): Promise<string> {
+  const row = await one<{ id: string }>(await getDb(), "select id from bugs where id = $1 and organization_id = $2 and project_id = $3", [
+    bugId,
+    orgId,
+    projectId,
+  ]);
+  if (!row) throw new UserError("That bug no longer exists.");
+  return row.id;
+}
+
+export async function editCommentAction(_prev: ActionState, form: FormData): Promise<ActionState> {
+  return attempt(async () => {
+    const org = text(form, "org");
+    const ctx = await getOrgContext(org);
+    const access = await getProjectAccess(org, text(form, "project"));
+    assertCan(access.permissions, "bug.comment");
+    const body = text(form, "body");
+    if (!body) throw new UserError("A comment can't be empty.");
+    const bugId = await bugInProject(ctx.org.id, access.project.id, text(form, "bugId"));
+    await editComment(ctx.org.id, bugId, text(form, "commentId"), ctx.user.id, body);
+    refresh();
+    return { success: "saved", data: { savedAt: String(Date.now()) } };
+  });
+}
+
+export async function deleteCommentAction(_prev: ActionState, form: FormData): Promise<ActionState> {
+  return attempt(async () => {
+    const org = text(form, "org");
+    const ctx = await getOrgContext(org);
+    const access = await getProjectAccess(org, text(form, "project"));
+    const bugId = await bugInProject(ctx.org.id, access.project.id, text(form, "bugId"));
+    // Project managers keep discussions tidy; everyone else removes only their own.
+    await deleteComment(ctx.org.id, bugId, text(form, "commentId"), ctx.user.id, access.permissions.has("project.manage"));
+    refresh();
+    return { success: "deleted" };
   });
 }
 

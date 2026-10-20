@@ -1,7 +1,7 @@
 "use client";
 
 import { useActionState } from "react";
-import { addCommentAction, createShareLinkAction, updateBugAction } from "@/server/actions/project";
+import { createShareLinkAction, updateBugAction } from "@/server/actions/project";
 import type { ActionState } from "@/server/actions/result";
 import { useCopy } from "./agent-command";
 import { FormMessage, inputClass, secondaryButtonClass, SubmitButton } from "./form";
@@ -71,23 +71,6 @@ export function BugTextEditor({
           Cancel
         </button>
       </div>
-    </form>
-  );
-}
-
-export function CommentForm({ org, project, bugId }: { org: string; project: string; bugId: string }) {
-  const [state, action] = useActionState<ActionState, FormData>(addCommentAction, {});
-  return (
-    // A new key after each post clears the textarea.
-    <form key={state.data?.postedAt ?? "draft"} action={action} className="space-y-2">
-      <input type="hidden" name="org" value={org} />
-      <input type="hidden" name="project" value={project} />
-      <input type="hidden" name="bugId" value={bugId} />
-      <textarea name="body" rows={3} required maxLength={20000} placeholder="Add a comment" className={inputClass} />
-      <FormMessage error={state.error} />
-      <SubmitButton pendingText="Posting…" className={secondaryButtonClass}>
-        Comment
-      </SubmitButton>
     </form>
   );
 }

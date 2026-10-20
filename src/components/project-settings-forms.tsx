@@ -3,6 +3,7 @@
 import { useActionState } from "react";
 import {
   createComponentAction,
+  createPlatformAction,
   createVersionAction,
   setProjectMemberAction,
   setVersionStatusAction,
@@ -99,14 +100,28 @@ export function VersionStatusSelect({ ids, versionId, status }: { ids: Ids; vers
   );
 }
 
+export function AddPlatformForm({ ids }: { ids: Ids }) {
+  const [state, action] = useActionState<ActionState, FormData>(createPlatformAction, {});
+  return (
+    <form key={state.success} action={action} className="space-y-2">
+      <Hidden {...ids} />
+      <div className="flex gap-2">
+        <input name="name" required maxLength={100} placeholder="Admin panel" aria-label="Platform name" className={inputClass} />
+        <SubmitButton pendingText="Adding…">Add platform</SubmitButton>
+      </div>
+      <FormMessage error={state.error} />
+    </form>
+  );
+}
+
 export function AddComponentForm({ ids }: { ids: Ids }) {
   const [state, action] = useActionState<ActionState, FormData>(createComponentAction, {});
   return (
     <form key={state.success} action={action} className="space-y-2">
       <Hidden {...ids} />
       <div className="flex gap-2">
-        <input name="name" required maxLength={100} placeholder="Checkout" aria-label="Module name" className={inputClass} />
-        <SubmitButton pendingText="Adding…">Add module</SubmitButton>
+        <input name="name" required maxLength={100} placeholder="Checkout" aria-label="Feature name" className={inputClass} />
+        <SubmitButton pendingText="Adding…">Add feature</SubmitButton>
       </div>
       <FormMessage error={state.error} />
     </form>

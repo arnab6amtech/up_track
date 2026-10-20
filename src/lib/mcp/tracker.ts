@@ -1,5 +1,5 @@
 import "server-only";
-import { isFailed, type CaptureLog } from "../capture-types";
+import { isApiCall, isFailed, type CaptureLog } from "../capture-types";
 import { PRIORITY_LABEL, RESOLUTION_LABEL, SEVERITY_LABEL } from "../labels";
 import { canViewProject } from "@/server/access";
 import { findBugByKey, listComments, PRIORITIES, SEVERITIES, type BugDetail } from "@/server/bugs";
@@ -45,6 +45,12 @@ export async function listProjectsTool(caller: TokenCaller): Promise<ToolResult>
       [caller.orgId],
     ),
   );
+  const platforms = await inOrg(caller.orgId, (tx) =>
+    tx.query<{ project_id: string; name: string }>(
+      "select project_id, name from project_platforms where organization_id = $1 and archived_at is null order by position, created_at",
+      [caller.orgId],
+    ),
+  );
   return json({
     organization: caller.orgName,
     projects: projects.map((p) => ({
@@ -54,6 +60,7 @@ export async function listProjectsTool(caller: TokenCaller): Promise<ToolResult>
       open_bugs: p.openBugs,
       total_bugs: p.totalBugs,
       versions: versions.filter((v) => v.project_id === p.id).map((v) => `${v.name} (${v.status})`),
+      platforms: platforms.filter((pl) => pl.project_id === p.id).map((pl) => pl.name),
     })),
   });
 }
@@ -61,6 +68,9 @@ export async function listProjectsTool(caller: TokenCaller): Promise<ToolResult>
 export interface TrackerSearchArgs {
   project?: string;
   version?: string;
+  platform?: string;
+  feature?: string;
+  /** Older name for feature. */
   module?: string;
   status?: string;
   open_only?: boolean;
@@ -86,7 +96,9 @@ export async function searchTracker(caller: TokenCaller, args: TrackerSearchArgs
   };
   if (args.project) add("p.key = upper(?)", args.project);
   if (args.version) add("v.name ilike ?", args.version);
-  if (args.module) add("c.name ilike '%' || ? || '%'", args.module);
+  if (args.platform) add("pl.name ilike '%' || ? || '%'", args.platform);
+  const feature = args.feature ?? args.module;
+  if (feature) add("c.name ilike '%' || ? || '%'", feature);
   if (args.open_only) where.push("s.category <> 'done'");
   if (args.status) add("s.name ilike ?", args.status);
   if (args.assignee === "me") where.push("b.assignee_id = $2");
@@ -104,11 +116,12 @@ export async function searchTracker(caller: TokenCaller, args: TrackerSearchArgs
     join workflow_statuses s on s.id = b.status_id
     join project_versions v on v.id = b.found_in_version_id
     left join project_components c on c.id = b.component_id
+    left join project_platforms pl on pl.id = b.platform_id
     left join users a on a.id = b.assignee_id`;
   return inOrg(caller.orgId, async (tx) => {
     const rows = await tx.query<Record<string, unknown>>(
       `select p.key || '-' || b.number as id, b.title, s.name as status, s.category <> 'done' as open, b.resolution,
-              b.severity, b.priority, a.full_name as assignee, v.name as found_in, c.name as module,
+              b.severity, b.priority, a.full_name as assignee, v.name as found_in, pl.name as platform, c.name as feature,
               (select count(*)::int from bug_attachments x where x.bug_id = b.id and x.kind in ('image', 'video') and x.deleted_at is null) as references,
               exists (select 1 from bug_captures bc where bc.bug_id = b.id) as has_api_log
          ${from} where ${whereSql}
@@ -139,7 +152,8 @@ export async function getTrackerBug(caller: TokenCaller, key: string, baseUrl: s
     ["Priority", PRIORITY_LABEL[bug.priority]],
     ["Found in version", bug.foundInVersionName],
     ["Fixed in version", bug.fixedInVersionName],
-    ["Module", bug.componentName],
+    ["Platform", bug.platformName],
+    ["Feature", bug.componentName],
     ["Reported by", bug.reporterName],
     ["Assignee", bug.assigneeName ?? "nobody"],
     ["UpTrack page", `${baseUrl}/o/${caller.orgSlug}/p/${bug.projectKey}/bugs/${bug.number}`],
@@ -157,7 +171,12 @@ export async function getTrackerBug(caller: TokenCaller, key: string, baseUrl: s
   const media = bug.attachments.filter((a) => a.kind === "image" || a.kind === "video");
   if (media.length) {
     lines.push("", "## References", "Call get_bug_reference to view the screenshots.");
-    media.forEach((a, i) => lines.push(`${i + 1}. ${a.kind === "image" ? "Screenshot" : "Recording"} "${a.fileName}"`));
+    const clock = (ms: number) => `${Math.floor(ms / 60000)}:${String(Math.floor(ms / 1000) % 60).padStart(2, "0")}`;
+    media.forEach((a, i) => {
+      lines.push(`${i + 1}. ${a.kind === "image" ? "Screenshot" : "Recording"} "${a.fileName}"`);
+      // Where the reporter said the bug shows up in the recording.
+      for (const m of a.markers ?? []) lines.push(`   - Marked at ${clock(m.atMs)}${m.label ? `: ${m.label}` : ""}`);
+    });
   }
 
   if (bug.capture) {
@@ -165,12 +184,18 @@ export async function getTrackerBug(caller: TokenCaller, key: string, baseUrl: s
     lines.push("", "## Captured page", `- **Page:** ${c.pageUrl}`, `- **Browser:** ${[c.browser, c.os].filter(Boolean).join(" · ")}, window ${c.viewportWidth}×${c.viewportHeight}`);
     const log = await readLog(bug);
     if (log) {
-      const failed = log.network.filter(isFailed);
-      lines.push("", `## Failed API calls (${failed.length} of ${log.network.length})`);
+      const apiCalls = log.network.filter(isApiCall);
+      const failed = apiCalls.filter(isFailed);
+      const failedFiles = log.network.filter((e) => !isApiCall(e) && isFailed(e));
+      lines.push("", `## Failed API calls (${failed.length} of ${apiCalls.length})`);
       if (failed.length === 0) lines.push("None.");
       for (const e of failed.slice(0, 10)) {
         lines.push(`- ${describeCall(e)}`);
         if (e.responseBody) lines.push(`  Response: ${clip(e.responseBody.replace(/\s+/g, " "), 400)}`);
+      }
+      if (failedFiles.length) {
+        lines.push("", `## Files that failed to load (${failedFiles.length})`);
+        for (const e of failedFiles.slice(0, 10)) lines.push(`- ${e.type}: ${e.url}${e.status ? ` (${e.status})` : ""}`);
       }
       const errors = log.console.filter((x) => x.level === "error");
       if (errors.length) {
@@ -218,7 +243,7 @@ export async function getTrackerReference(caller: TokenCaller, key: string, base
 export async function getTrackerLogs(
   caller: TokenCaller,
   key: string,
-  opts: { failed_only?: boolean; url_contains?: string; include_bodies?: boolean; limit?: number },
+  opts: { failed_only?: boolean; url_contains?: string; include_bodies?: boolean; include_files?: boolean; limit?: number },
 ): Promise<ToolResult> {
   const bug = await visibleBug(caller, key);
   if (!bug) return fail(`No bug ${key.toUpperCase()} that you can see.`);
@@ -226,9 +251,12 @@ export async function getTrackerLogs(
   if (!log) return fail(`${key.toUpperCase()} wasn't reported with the browser extension, so it has no API log.`);
   const needle = opts.url_contains?.toLowerCase();
   const limit = opts.limit ?? 50;
-  const calls = log.network.filter((e) => (!opts.failed_only || isFailed(e)) && (!needle || e.url.toLowerCase().includes(needle)));
+  // Documents, styles, scripts, images and other files only when asked: they rarely explain a bug.
+  const pool = opts.include_files ? log.network : log.network.filter(isApiCall);
+  const calls = pool.filter((e) => (!opts.failed_only || isFailed(e)) && (!needle || e.url.toLowerCase().includes(needle)));
   return json({
-    total_calls: log.network.length,
+    total_calls: pool.length,
+    ...(opts.include_files ? {} : { other_requests: log.network.length - pool.length }),
     matching_calls: calls.length,
     calls: calls.slice(0, limit).map((e) => (opts.include_bodies === false ? { ...e, requestBody: undefined, responseBody: undefined } : e)),
     console: log.console.slice(0, limit),
@@ -237,13 +265,23 @@ export async function getTrackerLogs(
 
 export async function trackerSummary(caller: TokenCaller, project?: string): Promise<ToolResult> {
   return inOrg(caller.orgId, async (tx) => {
-    const rows = await tx.query<{ project: string; status: string; open: boolean; severity: string; assignee: string | null; module: string | null }>(
-      `select p.key as project, s.name as status, s.category <> 'done' as open, b.severity, a.full_name as assignee, c.name as module
+    const rows = await tx.query<{
+      project: string;
+      status: string;
+      open: boolean;
+      severity: string;
+      assignee: string | null;
+      platform: string | null;
+      feature: string | null;
+    }>(
+      `select p.key as project, s.name as status, s.category <> 'done' as open, b.severity, a.full_name as assignee,
+              pl.name as platform, c.name as feature
          from bugs b
          join projects p on p.id = b.project_id and p.deleted_at is null
          join workflow_statuses s on s.id = b.status_id
          left join users a on a.id = b.assignee_id
          left join project_components c on c.id = b.component_id
+         left join project_platforms pl on pl.id = b.platform_id
         where b.organization_id = $1 and b.deleted_at is null
           and ($3 or exists (select 1 from project_members pm where pm.project_id = p.id and pm.user_id = $2))
           and ($4::text is null or p.key = upper($4))`,
@@ -262,7 +300,8 @@ export async function trackerSummary(caller: TokenCaller, project?: string): Pro
       open_by_project: tally(open, (r) => r.project),
       open_by_severity: tally(open, (r) => r.severity),
       open_by_assignee: tally(open, (r) => r.assignee),
-      open_by_module: tally(open, (r) => r.module),
+      ...(rows.some((r) => r.platform) ? { open_by_platform: tally(open, (r) => r.platform) } : {}),
+      open_by_feature: tally(open, (r) => r.feature),
       by_status: tally(rows, (r) => r.status),
     });
   });

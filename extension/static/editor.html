@@ -40,27 +40,53 @@
               <canvas id="canvas"></canvas>
               <textarea id="text-input" class="text-input" rows="1" hidden></textarea>
             </div>
-            <video id="video" controls playsinline hidden></video>
+            <!-- The video with its trimmer laid over its bottom edge. -->
+            <div id="player" class="player" hidden>
+              <video id="video" playsinline></video>
+              <!-- Drag the green handles to choose the part viewers see; the full recording is kept. -->
+              <div id="trim" class="trim" hidden>
+                <button type="button" class="trim-play" id="trim-play" aria-label="Play">
+                  <svg class="icon-play" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" aria-hidden="true"><path d="M6 4.2v11.6L15.5 10 6 4.2Z" /></svg>
+                  <svg class="icon-pause" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><rect x="5.5" y="4.5" width="3" height="11" rx="1" /><rect x="11.5" y="4.5" width="3" height="11" rx="1" /></svg>
+                </button>
+                <button type="button" class="trim-play" id="trim-mark" title="Add a timestamp: where the bug shows up (M)" aria-label="Add a timestamp">
+                  <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 17.5V3" /><path d="M5 3.5h9.5l-2 3.5 2 3.5H5" /></svg>
+                </button>
+                <div class="trim-track" id="trim-track">
+                  <canvas class="trim-film" id="trim-film"></canvas>
+                  <div class="trim-shade" id="trim-shade-start"></div>
+                  <div class="trim-shade end" id="trim-shade-end"></div>
+                  <div class="trim-range" id="trim-range"></div>
+                  <div class="trim-marks" id="trim-marks"></div>
+                  <div class="trim-handle start" id="trim-start" role="slider" tabindex="0" aria-label="Trim start"><svg viewBox="0 0 4 14" aria-hidden="true"><circle cx="2" cy="2" r="1.5" /><circle cx="2" cy="7" r="1.5" /><circle cx="2" cy="12" r="1.5" /></svg></div>
+                  <div class="trim-handle end" id="trim-end" role="slider" tabindex="0" aria-label="Trim end"><svg viewBox="0 0 4 14" aria-hidden="true"><circle cx="2" cy="2" r="1.5" /><circle cx="2" cy="7" r="1.5" /><circle cx="2" cy="12" r="1.5" /></svg></div>
+                  <div class="trim-playhead" id="trim-playhead"></div>
+                </div>
+              </div>
+            </div>
             <p id="load-error" class="notice" hidden></p>
           </div>
 
-          <div id="trim" class="trim" hidden>
-            <strong class="small">Trim</strong>
-            <button type="button" class="btn btn-sm" id="trim-start">Start here</button>
-            <span class="mono small" id="trim-label">0:00 to 0:00</span>
-            <button type="button" class="btn btn-sm" id="trim-end">End here</button>
-            <button type="button" class="btn btn-sm" id="trim-reset">Reset</button>
-            <span class="small muted trim-hint">Viewers see this part. The full recording is kept.</span>
+          <!-- Recordings: the timestamps marked in them, in a collapsible row with a tab for each. -->
+          <div id="stamps" class="stamps" hidden>
+            <button type="button" class="stamps-toggle" id="stamps-toggle" aria-expanded="false" aria-controls="stamps-body">
+              <span>Timestamp <span class="count" id="count-timestamps"></span></span>
+              <svg class="stamps-arrow" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M5.22 8.22a.75.75 0 0 1 1.06 0L10 11.94l3.72-3.72a.75.75 0 1 1 1.06 1.06l-4.25 4.25a.75.75 0 0 1-1.06 0L5.22 9.28a.75.75 0 0 1 0-1.06Z" clip-rule="evenodd" /></svg>
+            </button>
+            <div class="stamps-body" id="stamps-body" hidden>
+              <div class="stamps-tabs" id="stamps-tabs" role="tablist" aria-label="Timestamps"></div>
+              <div class="stamps-panel" id="stamps-panel" role="tabpanel"></div>
+            </div>
           </div>
         </div>
 
         <form id="form" class="report-form">
-          <input id="title" class="title-input" maxlength="300" placeholder="Title: what went wrong?" aria-label="Title" required />
+          <input id="title" class="title-input" maxlength="300" placeholder="What went wrong?" aria-label="Title" required />
           <textarea
             id="description"
             class="description-input"
             rows="2"
-            placeholder="Add a description: steps to reproduce, what you expected, what happened"
+            placeholder="Steps to reproduce, what you expected, what happened"
             aria-label="Description"
           ></textarea>
           <div class="fields">
@@ -72,22 +98,22 @@
               <label for="version">Found in version</label>
               <select id="version" class="input" required></select>
             </div>
-            <div class="field" id="module-field" hidden>
-              <label for="module">Module</label>
-              <select id="module" class="input"></select>
+            <div class="field" id="platform-field" hidden>
+              <label for="platform">Platform</label>
+              <select id="platform" class="input"></select>
+            </div>
+            <div class="field">
+              <label for="module">Feature</label>
+              <select id="module" class="input" required></select>
             </div>
             <div class="field">
               <label for="severity">Severity</label>
               <select id="severity" class="input"></select>
             </div>
-            <div class="field">
-              <label for="priority">Priority</label>
-              <select id="priority" class="input"></select>
-            </div>
           </div>
           <p id="projects-error" class="notice" hidden></p>
           <div class="form-foot">
-            <label class="check small"><input type="checkbox" id="attach-log" checked /> Attach API calls and console log</label>
+            <label class="check small"><input type="checkbox" id="attach-log" checked /> Send network requests and console log</label>
             <span class="small muted" id="log-summary"></span>
           </div>
           <p id="log-missing" class="notice" hidden>
@@ -125,24 +151,43 @@
         </section>
       </section>
 
+      <div
+        id="resizer"
+        class="resizer"
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="Resize the side panel"
+        tabindex="0"
+        title="Drag to resize. Double-click to reset."
+      ></div>
+
       <aside class="devtools" aria-label="Captured from the page">
         <div class="tabs" role="tablist">
-          <button type="button" role="tab" class="tab" data-tab="page" aria-selected="true">Captured page</button>
-          <button type="button" role="tab" class="tab" data-tab="network" aria-selected="false">API calls <span class="count" id="count-network"></span></button>
-          <button type="button" role="tab" class="tab" data-tab="console" aria-selected="false">Console log <span class="count" id="count-console"></span></button>
+          <button type="button" role="tab" class="tab" data-tab="page" aria-selected="true" title="The page the bug was captured on">Page</button>
+          <button type="button" role="tab" class="tab" data-tab="network" aria-selected="false">Network <span class="count" id="count-network"></span></button>
+          <button type="button" role="tab" class="tab" data-tab="console" aria-selected="false">Console <span class="count" id="count-console"></span></button>
         </div>
         <div class="tab-body" id="tab-page" role="tabpanel">
           <dl class="details" id="page-details"></dl>
         </div>
         <div class="tab-body" id="tab-network" role="tabpanel" hidden>
           <div class="tab-tools">
-            <input type="search" id="network-filter" class="input filter" placeholder="Filter by URL" aria-label="Filter API calls by URL" />
+            <input type="search" id="network-filter" class="input filter" placeholder="Filter by URL" aria-label="Filter requests by URL" />
             <label class="check small"><input type="checkbox" id="failed-only" /> Failed only</label>
+          </div>
+          <div class="chips" id="network-types" role="toolbar" aria-label="Request types"></div>
+          <div class="list-head">
+            <label class="check small"><input type="checkbox" class="pick" data-kind="network" /> <span id="picked-network"></span></label>
+            <span class="small muted">Only ticked requests are sent</span>
           </div>
           <ul class="entries" id="network-list"></ul>
           <p class="small muted empty" id="network-empty" hidden></p>
         </div>
         <div class="tab-body" id="tab-console" role="tabpanel" hidden>
+          <div class="list-head">
+            <label class="check small"><input type="checkbox" class="pick" data-kind="console" /> <span id="picked-console"></span></label>
+            <span class="small muted">Only ticked entries are sent</span>
+          </div>
           <ul class="entries" id="console-list"></ul>
           <p class="small muted empty" id="console-empty" hidden></p>
         </div>

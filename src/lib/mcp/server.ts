@@ -45,7 +45,9 @@ export function createMcpServer({ baseUrl, caller }: { baseUrl: string; caller: 
       inputSchema: {
         project: z.string().optional().describe("Project key, e.g. UPT."),
         version: z.string().optional().describe("Version the bug was found in, e.g. 1.0."),
-        module: z.string().optional(),
+        platform: z.string().optional().describe("Platform the bug was found on, e.g. Admin panel or User app."),
+        feature: z.string().optional().describe("Feature the bug is in, e.g. Checkout."),
+        module: z.string().optional().describe("Spreadsheets only: the module column."),
         open_only: z.boolean().optional().describe("Only bugs that aren't done yet."),
         status: z.string().optional().describe("Status name, e.g. Open, In progress, Ready for QA."),
         assignee: z.string().optional().describe('"me", "none", or part of a name.'),
@@ -116,6 +118,10 @@ export function createMcpServer({ baseUrl, caller }: { baseUrl: string; caller: 
         failed_only: z.boolean().optional().describe("Only calls that failed (network error or HTTP 4xx/5xx)."),
         url_contains: z.string().optional().describe("Only calls whose URL contains this text."),
         include_bodies: z.boolean().optional().describe("Include request/response bodies. Default true."),
+        include_files: z
+          .boolean()
+          .optional()
+          .describe("Also list the documents, stylesheets, scripts, fonts, images and media the page loaded (URL, status, timing, size). Default false."),
         limit: z.number().int().min(1).max(200).optional().describe("Default 50."),
       },
       annotations: READ_ONLY,
@@ -131,7 +137,7 @@ export function createMcpServer({ baseUrl, caller }: { baseUrl: string; caller: 
     "get_summary",
     {
       title: "Bug summary",
-      description: "Open bugs by project, severity, assignee and module, plus totals by status. Good for picking what to work on.",
+      description: "Open bugs by project, severity, assignee, platform and feature, plus totals by status. Good for picking what to work on.",
       inputSchema: { project: z.string().optional().describe("Limit to one project key."), workbook: workbookArg },
       annotations: READ_ONLY,
     },

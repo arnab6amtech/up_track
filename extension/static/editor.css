@@ -32,13 +32,51 @@ body {
   gap: 10px;
 }
 
+/* The middle column is the drag handle; --side is the panel width the reporter dragged to. */
 .layout {
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) clamp(360px, 30vw, 480px);
-  gap: 12px;
+  grid-template-columns: minmax(0, 1fr) 12px var(--side, clamp(360px, 30vw, 480px));
   padding: 12px;
+}
+
+.resizer {
+  position: relative;
+  cursor: col-resize;
+  touch-action: none;
+  outline: none;
+}
+
+.resizer::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 4px;
+  height: 44px;
+  border-radius: 999px;
+  background: var(--line);
+  transform: translate(-50%, -50%);
+  transition: background 0.15s, height 0.15s;
+}
+
+.resizer:hover::after,
+.resizer:focus-visible::after,
+body.resizing .resizer::after {
+  height: 72px;
+  background: #a3a3a3;
+}
+
+/* While dragging: no text selection, and the cursor stays a resize cursor over the video and lists. */
+body.resizing {
+  cursor: col-resize;
+  user-select: none;
+}
+
+body.resizing .report,
+body.resizing .devtools {
+  pointer-events: none;
 }
 
 .report,
@@ -163,27 +201,197 @@ body {
   outline: none;
 }
 
-.stage video {
-  display: block;
+/* The recording, with its trimmer over the bottom edge. */
+.player {
+  position: relative;
   max-width: 100%;
+  overflow: hidden;
   border: 1px solid var(--line);
   border-radius: 6px;
   background: var(--bg);
+  line-height: 0;
 }
+
+.player video {
+  display: block;
+  max-width: 100%;
+}
+
+/* ---- Trimming a recording: thumbnails, a dark translucent selection with a handle at each end, and a playhead ---- */
 
 .trim {
-  flex: none;
+  --trim: rgb(17 17 17 / 0.72);
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
-  padding: 8px 12px;
-  background: var(--bg);
-  border-top: 1px solid var(--line);
+  padding: 20px 10px 8px;
+  background: linear-gradient(to bottom, transparent, rgb(0 0 0 / 0.45));
+  line-height: normal;
 }
 
-.trim-hint {
-  margin-left: 4px;
+.trim-play {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 28px;
+  border: 0;
+  border-radius: 7px;
+  background: rgb(17 17 17 / 0.72);
+  color: #fff;
+  cursor: pointer;
+}
+
+.trim-play:hover {
+  background: rgb(17 17 17 / 0.88);
+}
+
+.trim-play:focus-visible {
+  outline: 2px solid #fff;
+}
+
+.trim-play svg {
+  width: 15px;
+  height: 15px;
+}
+
+.trim-play .icon-pause,
+.trim-play.playing .icon-play {
+  display: none;
+}
+
+.trim-play.playing .icon-pause {
+  display: block;
+}
+
+.trim-track {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  height: 28px;
+  border-radius: 6px;
+  background: rgb(255 255 255 / 0.85);
+  cursor: pointer;
+  touch-action: none;
+}
+
+.trim-film {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border-radius: 6px;
+}
+
+/* The parts left out are darkened. */
+.trim-shade {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  border-radius: 6px 0 0 6px;
+  background: rgb(0 0 0 / 0.5);
+  pointer-events: none;
+}
+
+.trim-shade.end {
+  left: auto;
+  right: 0;
+  border-radius: 0 6px 6px 0;
+}
+
+.trim-range {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border-top: 2px solid var(--trim);
+  border-bottom: 2px solid var(--trim);
+  pointer-events: none;
+}
+
+/* Marked moments: amber pins on the timeline. */
+.trim-marks {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.trim-pin {
+  position: absolute;
+  top: -5px;
+  bottom: 0;
+  width: 2px;
+  margin-left: -1px;
+  border: 0;
+  padding: 0;
+  border-radius: 1px;
+  background: #fbbf24;
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.trim-pin::before {
+  content: "";
+  position: absolute;
+  top: -3px;
+  left: -3px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #fbbf24;
+  box-shadow: 0 0 0 1.5px rgb(0 0 0 / 0.45);
+}
+
+.trim-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  display: grid;
+  place-items: center;
+  width: 12px;
+  background: var(--trim);
+  color: #fff;
+  cursor: ew-resize;
+  outline: none;
+}
+
+.trim-handle.start {
+  border-radius: 6px 0 0 6px;
+}
+
+.trim-handle.end {
+  border-radius: 0 6px 6px 0;
+}
+
+.trim-handle svg {
+  width: 3px;
+  height: 11px;
+  fill: currentColor;
+}
+
+.trim-handle:hover,
+.trim-handle:focus-visible {
+  background: rgb(17 17 17 / 0.9);
+}
+
+.trim-playhead {
+  position: absolute;
+  top: -3px;
+  bottom: -3px;
+  width: 2px;
+  margin-left: -1px;
+  border-radius: 1px;
+  background: #fff;
+  box-shadow: 0 0 0 1px rgb(0 0 0 / 0.35);
+  pointer-events: none;
+}
+
+#video {
+  cursor: pointer;
 }
 
 /* ---- Title, description and fields ---- */
@@ -395,7 +603,7 @@ body {
 
 .net summary {
   display: grid;
-  grid-template-columns: 34px 42px minmax(0, 1fr) auto;
+  grid-template-columns: 14px 34px 60px minmax(0, 1fr) auto;
   align-items: center;
   gap: 6px;
   padding: 7px 10px;
@@ -415,17 +623,6 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.entry-body {
-  display: grid;
-  gap: 8px;
-  padding: 8px 10px 10px;
-}
-
-.entry-body p {
-  margin: 0 0 3px;
-  font-weight: 600;
 }
 
 .entry pre {
@@ -507,6 +704,11 @@ body {
 
   .layout {
     grid-template-columns: 1fr;
+    gap: 12px;
+  }
+
+  .resizer {
+    display: none;
   }
 
   .media {
@@ -517,4 +719,325 @@ body {
   .devtools {
     max-height: 80vh;
   }
+}
+
+/* ---- One API call's details ---- */
+
+.call {
+  display: grid;
+  gap: 8px;
+  padding: 6px 10px 10px;
+}
+
+.call-error {
+  margin: 0;
+  color: var(--danger);
+}
+
+.call-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border-bottom: 1px solid var(--line);
+}
+
+.call-tabs {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.call-tab {
+  flex: none;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  background: none;
+  padding: 6px 7px;
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--muted);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.call-tab:hover {
+  color: var(--fg);
+}
+
+.call-tab[aria-selected="true"] {
+  color: var(--fg);
+  border-bottom-color: var(--accent);
+}
+
+.call-tab.empty {
+  opacity: 0.55;
+}
+
+.call-copy {
+  flex: none;
+}
+
+.entry pre.call-panel {
+  max-height: 260px;
+}
+
+/* ---- Choosing which requests and console entries to send ---- */
+
+.list-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 2px 8px 11px;
+}
+
+/* A small, quiet checkbox: a light outline, filled black when ticked, a dash when half-ticked. */
+.pick {
+  appearance: none;
+  flex: none;
+  display: inline-grid;
+  place-content: center;
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  border: 1.5px solid #c7c7c7;
+  border-radius: 4px;
+  background: var(--bg);
+  cursor: pointer;
+  transition: background 0.1s, border-color 0.1s;
+}
+
+.pick:hover {
+  border-color: var(--muted);
+}
+
+.pick:checked,
+.pick:indeterminate {
+  border-color: var(--accent);
+  background: var(--accent);
+}
+
+.pick:checked::after {
+  content: "";
+  width: 7px;
+  height: 4px;
+  margin-top: -2px;
+  border: solid #fff;
+  border-width: 0 0 1.5px 1.5px;
+  transform: rotate(-45deg);
+}
+
+.pick:indeterminate::after {
+  content: "";
+  width: 7px;
+  height: 1.5px;
+  background: #fff;
+}
+
+.pick:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.pick:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* Left out of the report: still readable, clearly set aside. */
+.excluded .net summary > :not(.pick),
+.excluded .call,
+.console-entry.excluded > :not(.console-head),
+.console-entry.excluded .console-head > :not(.pick) {
+  opacity: 0.4;
+}
+
+/* ---- Request types (as in DevTools): one row of tabs, scrolling sideways when the panel is narrow ---- */
+
+.chips {
+  display: flex;
+  margin: 0 -14px 10px;
+  padding: 0 8px;
+  border-bottom: 1px solid var(--line);
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+
+.chips::-webkit-scrollbar {
+  display: none;
+}
+
+.chip {
+  flex: none;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  background: none;
+  padding: 7px 7px 6px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--muted);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.chip:hover {
+  color: var(--fg);
+}
+
+.chip[aria-pressed="true"] {
+  border-bottom-color: var(--accent);
+  color: var(--fg);
+}
+
+.chip .count {
+  margin-left: 3px;
+  font-weight: 400;
+}
+
+/* Types the page didn't load: still clickable, but quiet. */
+.chip.none {
+  opacity: 0.45;
+}
+
+/* ---- Timestamps: a collapsible row under the recording, with a tab per timestamp ---- */
+
+.stamps {
+  flex: none;
+  background: var(--bg);
+  border-top: 1px solid var(--line);
+}
+
+.stamps-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  border: 0;
+  background: none;
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.stamps-toggle:hover {
+  background: var(--surface-2);
+}
+
+.stamps-toggle .count {
+  margin-left: 2px;
+  font-weight: 400;
+  color: var(--muted);
+}
+
+.stamps-arrow {
+  width: 16px;
+  height: 16px;
+  color: var(--muted);
+  transition: transform 0.15s;
+}
+
+.stamps-toggle[aria-expanded="true"] .stamps-arrow {
+  transform: rotate(180deg);
+}
+
+.stamps-body {
+  padding: 0 14px 10px;
+}
+
+.stamps-tabs {
+  display: flex;
+  border-bottom: 1px solid var(--line);
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+
+.stamps-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.stamp-tab {
+  flex: none;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-variant-numeric: tabular-nums;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  background: none;
+  padding: 6px 8px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--muted);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.stamp-tab:hover {
+  color: var(--fg);
+}
+
+.stamp-tab[aria-selected="true"] {
+  border-bottom-color: var(--accent);
+  color: var(--fg);
+}
+
+.stamp-tab.outside {
+  opacity: 0.45;
+}
+
+.stamps-panel {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-top: 8px;
+}
+
+.stamps-panel.outside .marker-note {
+  opacity: 0.45;
+}
+
+.stamps-hint {
+  margin: 8px 0 0;
+}
+
+.marker-note {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  padding: 3px 2px;
+  font-size: 13px;
+  outline: none;
+  background: none;
+}
+
+.marker-note:focus {
+  border-bottom-color: var(--accent);
+}
+
+.marker-remove {
+  flex: none;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font-size: 16px;
+  line-height: 1;
+  padding: 2px 6px;
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+.marker-remove:hover {
+  color: var(--fg);
+  background: var(--surface-2);
+}
+
+.trim-pin.outside {
+  opacity: 0.4;
 }

@@ -1,8 +1,10 @@
 // Runs in the page's own JavaScript world from the very start of every page load. It watches the page's
-// fetch/XHR calls and console errors and hands each one to relay.ts as a JSON string, after hiding
-// secrets. It only observes: every wrapper calls the original and never throws into page code.
+// fetch/XHR calls (in full), WebSockets, everything else the page loads (from resource timing: documents,
+// styles, scripts, fonts, images, media, ...) and console errors, and hands each one to relay.ts as a JSON
+// string, after hiding secrets. It only observes: every wrapper calls the original and never throws into
+// page code.
 
-import type { ConsoleEntry, NetworkEntry } from "./shared/types";
+import { LOAD_FAILED, type ConsoleEntry, type NetworkEntry, type NetworkType } from "./shared/types";
 
 const EVENT = "uptrack:record";
 const MAX_BODY = 20_000;
@@ -85,6 +87,9 @@ function describeBody(body: unknown): string | undefined {
 
 const readable = (contentType: string | null) => !!contentType && TEXTUAL.test(contentType) && !/event-stream/.test(contentType);
 
+const ext = (pattern: string) => new RegExp(`\\.(${pattern})([?#]|$)`, "i");
+const WASM = ext("wasm");
+
 // ---- fetch ----
 
 const originalFetch = window.fetch;
@@ -95,10 +100,12 @@ window.fetch = function (this: unknown, ...args: Parameters<typeof fetch>) {
   let base: Pick<NetworkEntry, "type" | "method" | "url" | "requestHeaders" | "requestBody"> | null = null;
   try {
     const request = input instanceof Request ? input : null;
+    const url = request ? request.url : String(input);
     base = {
-      type: "fetch",
+      // WebAssembly is fetched too; DevTools lists it on its own.
+      type: WASM.test(url) ? "wasm" : "fetch",
       method: (init?.method ?? request?.method ?? "GET").toUpperCase(),
-      url: redactUrl(request ? request.url : String(input)),
+      url: redactUrl(url),
       requestHeaders: headerObject(init?.headers ?? request?.headers),
       requestBody: describeBody(init?.body),
     };
@@ -120,6 +127,7 @@ window.fetch = function (this: unknown, ...args: Parameters<typeof fetch>) {
           kind: "network",
           data: {
             ...entry,
+            type: /wasm/.test(res.headers.get("content-type") ?? "") ? "wasm" : entry.type,
             status: res.status,
             statusText: res.statusText,
             startedAt,
@@ -209,6 +217,146 @@ proto.send = function (this: XMLHttpRequest, body?: Document | XMLHttpRequestBod
   }
   return originalSend.call(this, body);
 };
+
+// ---- WebSockets ----
+
+const OriginalWebSocket = window.WebSocket;
+if (OriginalWebSocket) {
+  window.WebSocket = new Proxy(OriginalWebSocket, {
+    construct(target, args, newTarget) {
+      const socket = Reflect.construct(target, args, newTarget) as WebSocket;
+      try {
+        const startedAt = Date.now();
+        const t0 = performance.now();
+        const base = { type: "websocket" as const, method: "GET", url: redactUrl(String(args[0])), startedAt };
+        let opened = false;
+        socket.addEventListener("open", () => {
+          opened = true;
+          emit({ kind: "network", data: { ...base, status: 101, statusText: "Switching Protocols", durationMs: performance.now() - t0 } });
+        });
+        socket.addEventListener("error", () => {
+          if (!opened) emit({ kind: "network", data: { ...base, status: 0, durationMs: performance.now() - t0, error: "The connection failed" } });
+        });
+      } catch {}
+      return socket;
+    },
+  });
+}
+
+// ---- Everything else the page loads ----
+
+const CSS = ext("css");
+const JS = ext("m?js|cjs");
+const FONT = ext("woff2?|ttf|otf|eot");
+const IMAGE = ext("png|jpe?g|gif|webp|avif|svg|ico|bmp|tiff?");
+const MEDIA = ext("mp4|webm|ogg|ogv|mp3|wav|m4a|aac|flac|m3u8|mpd|vtt");
+const MANIFEST = /(\.webmanifest|manifest\.json)([?#]|$)/i;
+
+/** DevTools' grouping, from what started the request, then the content type, then the file name. */
+function resourceType(e: PerformanceResourceTiming): NetworkType | null {
+  if (e.entryType === "navigation") return "document";
+  const url = e.name;
+  const contentType = (e as PerformanceResourceTiming & { contentType?: string }).contentType ?? "";
+  switch (e.initiatorType) {
+    case "fetch":
+    case "xmlhttprequest":
+      return null; // Recorded in full by the wrappers above.
+    case "iframe":
+    case "frame":
+      return "document";
+    case "script":
+      return "script";
+    case "img":
+    case "image":
+    case "input":
+      return "image";
+    case "video":
+    case "audio":
+    case "track":
+      return "media";
+  }
+  if (/css/.test(contentType) || CSS.test(url)) return "stylesheet";
+  if (/javascript|ecmascript/.test(contentType) || JS.test(url)) return "script";
+  if (/font/.test(contentType) || FONT.test(url)) return "font";
+  if (/^image\//.test(contentType) || IMAGE.test(url)) return "image";
+  if (/^(video|audio)\//.test(contentType) || MEDIA.test(url)) return "media";
+  if (/manifest/.test(contentType) || MANIFEST.test(url)) return "manifest";
+  if (/wasm/.test(contentType) || WASM.test(url)) return "wasm";
+  return "other";
+}
+
+function recordResource(e: PerformanceResourceTiming) {
+  // Chrome hands over the page's own entry early (still loading) and again once it's complete; keep the latter.
+  if (e.entryType === "navigation" && !(e as PerformanceNavigationTiming).loadEventEnd) return;
+  const type = resourceType(e);
+  if (!type) return;
+  emit({
+    kind: "network",
+    data: {
+      type,
+      method: "GET",
+      url: redactUrl(e.name),
+      // Chrome reports the status for same-origin and CORS-enabled files; 0 means it didn't say.
+      status: (e as PerformanceResourceTiming & { responseStatus?: number }).responseStatus ?? 0,
+      startedAt: Math.round(performance.timeOrigin + e.startTime),
+      durationMs: e.duration,
+      sizeBytes: e.transferSize || e.encodedBodySize || undefined,
+    },
+  });
+}
+
+try {
+  const observer = new PerformanceObserver((list) => {
+    for (const entry of list.getEntries()) recordResource(entry as PerformanceResourceTiming);
+  });
+  observer.observe({ type: "resource", buffered: true });
+  observer.observe({ type: "navigation", buffered: true });
+} catch {}
+
+function failedElement(target: EventTarget | null): { type: NetworkType; url: string } | null {
+  if (!(target instanceof Element)) return null;
+  const el = target as HTMLElement & { currentSrc?: string; src?: string; href?: string; rel?: string; as?: string };
+  const url = el.currentSrc || el.src || el.href;
+  if (!url) return null;
+  switch (el.tagName) {
+    case "IMG":
+    case "IMAGE":
+      return { type: "image", url };
+    case "SCRIPT":
+      return { type: "script", url };
+    case "VIDEO":
+    case "AUDIO":
+    case "SOURCE":
+    case "TRACK":
+      return { type: "media", url };
+    case "IFRAME":
+      return { type: "document", url };
+    case "LINK": {
+      const rel = (el.rel || "").toLowerCase();
+      if (rel.includes("stylesheet")) return { type: "stylesheet", url };
+      if (rel.includes("manifest")) return { type: "manifest", url };
+      if (rel.includes("icon")) return { type: "image", url };
+      if (el.as === "font") return { type: "font", url };
+      if (el.as === "script") return { type: "script", url };
+      return { type: "other", url };
+    }
+  }
+  return null;
+}
+
+// Files that fail to load fire "error" on their element, which reaches window only while capturing.
+window.addEventListener(
+  "error",
+  (e: Event) => {
+    // Script errors are ErrorEvents (handled below); a file that failed to load fires a plain Event.
+    if (e instanceof ErrorEvent) return;
+    const failed = failedElement(e.target);
+    if (failed) {
+      emit({ kind: "network", data: { ...failed, method: "GET", url: redactUrl(failed.url), status: 0, startedAt: Date.now(), durationMs: 0, error: LOAD_FAILED } });
+    }
+  },
+  true,
+);
 
 // ---- Console errors and uncaught exceptions ----
 

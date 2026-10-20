@@ -15,6 +15,8 @@ export interface MediaLink {
   video?: boolean;
   /** Drive only: the file's ID, for fetching it through the Drive API. */
   fileId?: string;
+  /** Recordings: moments the reporter marked, in milliseconds from the start of the file. */
+  markers?: { atMs: number; label?: string }[];
 }
 
 export interface BugRecord {

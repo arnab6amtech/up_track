@@ -8,7 +8,10 @@ export function attachmentUrl(id: string, shareToken?: string) {
 }
 
 /** Screenshots and recordings as gallery items (the API log is shown separately). */
-export function mediaLinks(attachments: Attachment[], shareToken?: string): MediaLink[] {
+export function mediaLinks(
+  attachments: (Pick<Attachment, "id" | "kind" | "fileName" | "trimStartMs" | "trimEndMs"> & Partial<Pick<Attachment, "markers">>)[],
+  shareToken?: string,
+): MediaLink[] {
   return attachments
     .filter((a) => a.kind === "image" || a.kind === "video")
     .map((a) => {
@@ -18,12 +21,12 @@ export function mediaLinks(attachments: Attachment[], shareToken?: string): Medi
         a.kind === "video" && (a.trimStartMs != null || a.trimEndMs != null)
           ? `#t=${(a.trimStartMs ?? 0) / 1000}${a.trimEndMs != null ? `,${a.trimEndMs / 1000}` : ""}`
           : "";
-      return { url, kind: a.kind as "image" | "video", src: `${url}${trim}`, label: a.fileName };
+      return { url, kind: a.kind as "image" | "video", src: `${url}${trim}`, label: a.fileName, ...(a.markers?.length ? { markers: a.markers } : {}) };
     });
 }
 
-/** Page and browser details plus the API/console log captured by the browser extension. */
-export function CaptureDetails({ capture: c, shareToken }: { capture: CaptureInfo; shareToken?: string }) {
+/** Page and browser details the browser extension recorded with the bug. */
+export function CapturedPage({ capture: c, heading = true }: { capture: CaptureInfo; heading?: boolean }) {
   const env: [string, React.ReactNode][] = [
     [
       "Page",
@@ -38,29 +41,44 @@ export function CaptureDetails({ capture: c, shareToken }: { capture: CaptureInf
     ["Time zone", c.timezone || "—"],
   ];
   return (
-    <div className="space-y-4">
-      <section className="rounded-xl border border-line bg-surface p-4">
-        <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted">Captured page</h2>
-        <dl className="grid gap-x-6 gap-y-2 text-sm sm:grid-cols-[7rem_1fr]">
-          {env.map(([k, v]) => (
-            <div key={k} className="contents">
-              <dt className="text-muted">{k}</dt>
-              <dd className="min-w-0">{v}</dd>
-            </div>
-          ))}
-        </dl>
-      </section>
-      {c.logAttachmentId && (
-        <section className="space-y-2">
-          <h2 className="text-sm font-semibold">
-            API calls and console{" "}
-            <span className="font-normal text-muted">
-              ({c.failedRequestCount} failed of {c.requestCount} · {c.consoleErrorCount} console errors)
-            </span>
-          </h2>
-          <CaptureLogPanel logUrl={attachmentUrl(c.logAttachmentId, shareToken)} failedCount={c.failedRequestCount} />
-        </section>
+    <section className="rounded-xl border border-line bg-surface p-4">
+      {heading && <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted">Captured page</h2>}
+      <dl className="grid gap-x-6 gap-y-2 text-sm sm:grid-cols-[7rem_1fr]">
+        {env.map(([k, v]) => (
+          <div key={k} className="contents">
+            <dt className="text-muted">{k}</dt>
+            <dd className="min-w-0">{v}</dd>
+          </div>
+        ))}
+      </dl>
+    </section>
+  );
+}
+
+/** The page's API calls and console log, with a one-line summary (or a heading, standing alone). */
+export function CaptureLog({ capture: c, shareToken, heading = true }: { capture: CaptureInfo; shareToken?: string; heading?: boolean }) {
+  if (!c.logAttachmentId) return null;
+  const summary = `${c.failedRequestCount} failed of ${c.requestCount} ${c.requestCount === 1 ? "request" : "requests"} · ${c.consoleErrorCount} console ${c.consoleErrorCount === 1 ? "error" : "errors"}`;
+  return (
+    <section className="space-y-2">
+      {heading ? (
+        <h2 className="text-sm font-semibold">
+          Network and console <span className="font-normal text-muted">({summary})</span>
+        </h2>
+      ) : (
+        <p className="text-xs text-muted">{summary}</p>
       )}
+      <CaptureLogPanel logUrl={attachmentUrl(c.logAttachmentId, shareToken)} failedCount={c.failedRequestCount} />
+    </section>
+  );
+}
+
+/** Page and browser details plus the API/console log captured by the browser extension. */
+export function CaptureDetails({ capture, shareToken }: { capture: CaptureInfo; shareToken?: string }) {
+  return (
+    <div className="space-y-4">
+      <CapturedPage capture={capture} />
+      <CaptureLog capture={capture} shareToken={shareToken} />
     </div>
   );
 }

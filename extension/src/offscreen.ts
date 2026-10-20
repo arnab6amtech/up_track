@@ -9,6 +9,12 @@ let stream: MediaStream | null = null;
 let chunks: Blob[] = [];
 let startedAt = 0;
 let stopTimer: ReturnType<typeof setTimeout> | undefined;
+let maxMs = 0;
+// Pauses don't count towards the length or the time limit.
+let pausedTotal = 0;
+let pausedAt: number | null = null;
+
+const elapsed = () => (pausedAt ?? performance.now()) - startedAt - pausedTotal;
 
 chrome.runtime.onMessage.addListener((message: OffscreenMessage, _sender, sendResponse) => {
   if (message?.target !== "offscreen") return false;
@@ -19,13 +25,30 @@ chrome.runtime.onMessage.addListener((message: OffscreenMessage, _sender, sendRe
     );
     return true;
   }
-  stop();
+  if (message.type === "pause") pause();
+  else if (message.type === "resume") resume();
+  else stop();
   sendResponse({ ok: true });
   return false;
 });
 
 function stop() {
-  if (recorder?.state === "recording") recorder.stop();
+  if (recorder && recorder.state !== "inactive") recorder.stop();
+}
+
+function pause() {
+  if (recorder?.state !== "recording") return;
+  recorder.pause();
+  pausedAt = performance.now();
+  clearTimeout(stopTimer);
+}
+
+function resume() {
+  if (recorder?.state !== "paused" || pausedAt === null) return;
+  pausedTotal += performance.now() - pausedAt;
+  pausedAt = null;
+  recorder.resume();
+  stopTimer = setTimeout(stop, Math.max(0, maxMs - elapsed()));
 }
 
 /**
@@ -35,7 +58,10 @@ function stop() {
  */
 const FRAME_LIMITS = { minWidth: 160, minHeight: 90, maxWidth: 1920, maxHeight: 1920 };
 
-async function start(streamId: string, maxMs: number) {
+async function start(streamId: string, limitMs: number) {
+  maxMs = limitMs;
+  pausedTotal = 0;
+  pausedAt = null;
   stream = await navigator.mediaDevices.getUserMedia({
     audio: false,
     // Chrome's tab-capture constraints aren't in the standard typings.
@@ -57,7 +83,7 @@ async function start(streamId: string, maxMs: number) {
 
 async function finish() {
   clearTimeout(stopTimer);
-  const durationMs = Math.round(performance.now() - startedAt);
+  const durationMs = Math.round(elapsed());
   const settings = stream?.getVideoTracks()[0]?.getSettings();
   stream?.getTracks().forEach((t) => t.stop());
   try {

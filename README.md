@@ -11,7 +11,8 @@ A bug tracker for QA and development teams. QA reports bugs from a web form or s
   - **Member**: works on the projects they're added to.
 - **Projects** have a short key (`UPT`) that prefixes bug numbers (`UPT-12`). In a project's **Settings**:
   - **Versions** (1.0, 1.1, …) with a status: planned, in development, in testing, released or archived. Every bug records the version it was found in, and optionally the version it was fixed in.
-  - **Modules** (Checkout, Cart, …) to group bugs by area.
+  - **Platforms** (Admin panel, User website, Vendor website, User app, …): the products one project covers. Optional; once a project has platforms, every new bug says which one it was found on and the bug list gets a tab per platform.
+  - **Features** (Checkout, Cart, …): the areas of the product. Every new bug names the feature it's in, so a project needs at least one before bugs can be reported.
   - **Team**: who works on the project, each with a project role.
 
 | Project role | Can |
@@ -23,9 +24,9 @@ A bug tracker for QA and development teams. QA reports bugs from a web form or s
 
 ## Bugs
 
-- **Report bug** (`/o/<org>/p/<KEY>/bugs/new`): title, version found in, module, severity (critical, high, medium, low), priority (urgent, high, medium, low), steps to reproduce, expected and actual result, and up to 10 screenshots or recordings of 25 MB each.
-- **Bug list**: search, and filter by status (open, done or a specific status), version, module, assignee, severity and priority, with sorting and pages of 50.
-- **Bug page**: details, references (images and videos inline), comments and a full history of who changed what. The **Details** panel changes status, assignee, severity, priority, fixed-in version and module. If someone else saved the bug in the meantime, your save is refused rather than overwriting their change.
+- **Report bug** (`/o/<org>/p/<KEY>/bugs/new`): title, platform (when the project has platforms), version found in, feature (required), severity (critical, high, medium, low), priority (urgent, high, medium, low), steps to reproduce, expected and actual result, and up to 10 screenshots or recordings of 25 MB each.
+- **Bug list**: a tab per platform (with counts) when the project has platforms, then one row per bug with its key, feature, title, severity, status, references and the AI agent command. Click the reference thumbnails to open the screenshots and recordings in a side panel. People who can move bugs change the status right in the list, with the same rules as the bug page: only SQA engineers and managers can close a bug, and closing asks for the resolution. Search, filter by status (open, done or a specific status), version, feature, assignee and severity, and sort by recently updated, newest or severity, in pages of 50.
+- **Bug page**: details, references (images and videos inline), comments and a full history of who changed what. Everything is changed in place: pick a new status or severity from the pills under the title, or a new assignee, fixed-in version, platform or feature from the details below it. Each change saves straight away. If someone else saved the bug in the meantime, your change is refused rather than overwriting theirs.
 - **Workflow**: Open → In progress → Ready for QA → Closed, plus Reopened. Closing a bug needs a resolution (fixed, won't fix, duplicate, cannot reproduce, by design, deferred).
 - **Share outside UpTrack**: creates a public, unguessable link (`/s/<token>`) that shows the report, references and API log to anyone who has it, with an optional expiry. Links can be revoked. Bugs from the extension get one automatically.
 
@@ -34,9 +35,9 @@ A bug tracker for QA and development teams. QA reports bugs from a web form or s
 `extension/` holds a Chrome, Edge and Brave extension (Manifest V3) for reporting bugs straight from the page, in the spirit of jam.dev:
 
 - **Screenshot** of the visible page, marked up with arrows, boxes, text and blur. Blur hides private details before upload.
-- **Record this tab** for up to 5 minutes, then trim it to the part viewers should see. The full recording is kept.
-- **API log:** from page load, the extension records the page's `fetch`/XHR calls (method, URL, status, timing, headers, bodies up to 20 KB) and its console errors and uncaught exceptions. Authorization headers, cookies, and fields or query parameters named like passwords, tokens, secrets or API keys are replaced with `[hidden by UpTrack]` before anything leaves the browser. Calls made by workers or other sites' iframes aren't seen.
-- **Create bug** picks the project, the version it was found in and the module (the last project and version are remembered), and files the bug in UpTrack. You get the bug key, its share link and the command for your AI agent.
+- **Record this tab** for up to 5 minutes. While recording, a floating pill on the page stops, pauses and resumes (pauses don't count towards the time), shows the time, adds a timestamp where the bug shows up (the flag), and has a pen for drawing on the page (strokes fade after a few seconds) and a blur tool for hiding parts of it (click a blur to remove it). The pill is part of the page, so it appears in the recording along with the drawings and blurs. Afterwards, trim the recording by dragging the handles on the timeline over the video (the full recording is kept), and add, annotate or remove timestamps in the Timestamp row under the recording, which has a tab for each (the flag button or M adds the moment on screen). Timestamps inside the trimmed part show in the same kind of Timestamp row under the video on the bug and share pages (picking one shows that moment) and in `get_bug`.
+- **Network and console log:** from page load, the extension records the page's `fetch`/XHR calls in full (method, URL, status, timing, headers, bodies up to 20 KB), everything else it loads as Chrome DevTools lists it (document, CSS, JS, fonts, images, media, manifest, WebSockets, Wasm and other: URL, status where the browser reports it, timing and size), files that fail to load, and its console errors and uncaught exceptions. Filter chips (All, Fetch/XHR, Doc, CSS, JS, Font, Img, Media, Manifest, Socket, Wasm, Other) work as in DevTools, and the reporter ticks which requests and console entries to send. Authorization headers, cookies, and fields or query parameters named like passwords, tokens, secrets or API keys are replaced with `[hidden by UpTrack]` before anything leaves the browser. Calls made by workers or other sites' iframes aren't seen.
+- **Create bug** picks the project, the version it was found in, the platform (when the project has platforms), the feature and the severity (the last choices are remembered), and files the bug in UpTrack. You get the bug key, its share link and the command for your AI agent.
 
 Install it from the app's **Extension** page: download the zip, which already contains this server's address, then use **Load unpacked** in `chrome://extensions`. There's nothing to configure: the extension reports as whoever is signed in to UpTrack in that browser, to the projects where they may report bugs, across all their organizations. When signed out, its menu offers a **Sign in** button. Signed-in uploads are accepted only from extension pages (checked by `Origin`). An API token in the extension's settings is optional, for people who'd rather not stay signed in.
 
@@ -64,12 +65,12 @@ claude mcp add --transport http uptrack https://uptrack.yourcompany.com/api/mcp 
 
 | Tool | Returns |
 | --- | --- |
-| `list_projects` | Projects the token's owner can see, with open and total bug counts and active versions |
-| `search_bugs` | Bugs filtered by project, version, module, status, assignee (`me` works), severity, priority or text. Add `open_only` for bugs that still need work. With `workbook`, searches a spreadsheet instead. |
+| `list_projects` | Projects the token's owner can see, with open and total bug counts, active versions and platforms |
+| `search_bugs` | Bugs filtered by project, version, platform, feature, status, assignee (`me` works), severity, priority or text. Add `open_only` for bugs that still need work. With `workbook`, searches a spreadsheet instead. |
 | `get_bug` | The full report for a key like `UPT-12`: steps, results, status, versions, people, failed API calls, comments, numbered references |
 | `get_bug_reference` | Screenshots as images. Recordings come back as a link. |
-| `get_bug_logs` | For extension reports: the API calls with headers and bodies, and console errors. Filter by failed calls or URL. |
-| `get_summary` | Open bugs by project, severity, assignee and module, plus totals by status |
+| `get_bug_logs` | For extension reports: the API calls with headers and bodies, and console errors. Filter by failed calls or URL; `include_files` adds the documents, styles, scripts, images and other files the page loaded. |
+| `get_summary` | Open bugs by project, severity, assignee, platform and feature, plus totals by status |
 | `list_workbooks` | Spreadsheet workbooks, for `search_bugs` and `get_bug` with `workbook` |
 
 The `fix-bug` prompt (`/uptrack:fix-bug UPT-12` in the VS Code extension, `/mcp__uptrack__fix-bug` in the terminal) takes a bug key or a few words. Without one, it lists your open bugs to choose from. It reads the bug, looks at the screenshots and API log, fixes the code, and ends with a note to post on the bug. Every bug page has a button that copies this command.

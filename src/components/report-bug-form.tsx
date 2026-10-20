@@ -16,6 +16,8 @@ export function ReportBugForm({
   project,
   versions,
   defaultVersionId,
+  platforms,
+  defaultPlatformId,
   components,
   members,
 }: {
@@ -23,6 +25,9 @@ export function ReportBugForm({
   project: string;
   versions: (Option & { status: string })[];
   defaultVersionId: string;
+  /** Empty when the project doesn't split into platforms. */
+  platforms: Option[];
+  defaultPlatformId?: string;
   components: Option[];
   /** Empty when the reporter can't assign bugs. */
   members: Option[];
@@ -41,6 +46,20 @@ export function ReportBugForm({
       </Field>
 
       <div className="grid gap-4 sm:grid-cols-2">
+        {platforms.length > 0 && (
+          <Field label="Platform" htmlFor="platformId" hint="Where you found it, such as Admin panel or User app.">
+            <select id="platformId" name="platformId" required defaultValue={defaultPlatformId ?? ""} className={selectClass}>
+              <option value="" disabled>
+                Choose a platform
+              </option>
+              {platforms.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+          </Field>
+        )}
         <Field label="Found in version" htmlFor="versionId">
           <select id="versionId" name="versionId" required defaultValue={defaultVersionId} className={selectClass}>
             {versions.map((v) => (
@@ -50,9 +69,11 @@ export function ReportBugForm({
             ))}
           </select>
         </Field>
-        <Field label="Module" htmlFor="componentId">
-          <select id="componentId" name="componentId" defaultValue="" className={selectClass}>
-            <option value="">None</option>
+        <Field label="Feature" htmlFor="componentId" hint="The part of the product the bug is in.">
+          <select id="componentId" name="componentId" required defaultValue="" className={selectClass}>
+            <option value="" disabled>
+              Choose a feature
+            </option>
             {components.map((c) => (
               <option key={c.id} value={c.id}>
                 {c.name}

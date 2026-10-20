@@ -137,7 +137,7 @@ export async function setVersionStatus(orgId: string, projectId: string, version
   );
 }
 
-// ---- Components (modules) ----
+// ---- Components (features) ----
 
 export interface Component {
   id: string;
@@ -170,7 +170,7 @@ export async function createComponent(orgId: string, projectId: string, name: st
       return row!.id;
     });
   } catch (err) {
-    if (isUniqueViolation(err)) throw new UserError("There's already a module with that name.");
+    if (isUniqueViolation(err)) throw new UserError("There's already a feature with that name.");
     throw err;
   }
 }
@@ -181,6 +181,57 @@ export async function archiveComponent(orgId: string, projectId: string, compone
       orgId,
       projectId,
       componentId,
+    ]),
+  );
+}
+
+// ---- Platforms (Admin panel, User website, User app, ...) ----
+
+export interface Platform {
+  id: string;
+  name: string;
+  bugCount: number;
+}
+
+/** A project's platforms in the order they were added, which is also the order of the bug list's tabs. */
+export async function listPlatforms(orgId: string, projectId: string): Promise<Platform[]> {
+  return inOrg(orgId, (tx) =>
+    tx.query<Platform>(
+      `select p.id, p.name,
+              (select count(*)::int from bugs b where b.platform_id = p.id and b.deleted_at is null) as "bugCount"
+         from project_platforms p
+        where p.project_id = $1 and p.archived_at is null
+        order by p.position, p.created_at`,
+      [projectId],
+    ),
+  );
+}
+
+export async function createPlatform(orgId: string, projectId: string, name: string): Promise<string> {
+  try {
+    return await inOrg(orgId, async (tx) => {
+      const row = await one<{ id: string }>(
+        tx,
+        `insert into project_platforms (organization_id, project_id, name, position)
+         values ($1, $2, $3, (select coalesce(max(position), 0) + 1 from project_platforms where project_id = $2))
+         returning id`,
+        [orgId, projectId, name.trim()],
+      );
+      return row!.id;
+    });
+  } catch (err) {
+    if (isUniqueViolation(err)) throw new UserError("There's already a platform with that name.");
+    throw err;
+  }
+}
+
+/** Removes a platform from the pickers; bugs found on it keep it. */
+export async function archivePlatform(orgId: string, projectId: string, platformId: string) {
+  await inOrg(orgId, (tx) =>
+    tx.query("update project_platforms set archived_at = now() where organization_id = $1 and project_id = $2 and id = $3", [
+      orgId,
+      projectId,
+      platformId,
     ]),
   );
 }

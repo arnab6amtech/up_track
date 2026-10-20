@@ -17,7 +17,7 @@ function readSeen(): boolean {
 }
 
 const EXAMPLES = [
-  "What's still open? Group it by module.",
+  "What's still open? Group it by feature.",
   "Fix UPT-12. Look at the screenshot first.",
   "Is the login timeout bug already fixed in this repo?",
 ];

@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { isFailed, type CaptureLog, type NetworkEntry } from "@/lib/capture-types";
+import { inFilter, isFailed, NETWORK_FILTERS, type CaptureLog, type NetworkEntry } from "@/lib/capture-types";
+import { useCopy } from "./agent-command";
 
 /** Network and console log of a captured bug, loaded on demand from the capture's log file. */
 export function CaptureLogPanel({ logUrl, failedCount }: { logUrl: string; failedCount: number }) {
@@ -10,6 +11,7 @@ export function CaptureLogPanel({ logUrl, failedCount }: { logUrl: string; faile
   const [tab, setTab] = useState<"network" | "console">("network");
   const [failedOnly, setFailedOnly] = useState(failedCount > 0);
   const [query, setQuery] = useState("");
+  const [types, setTypes] = useState("all");
   const [open, setOpen] = useState<number | null>(null);
 
   useEffect(() => {
@@ -29,8 +31,8 @@ export function CaptureLogPanel({ logUrl, failedCount }: { logUrl: string; faile
     const q = query.trim().toLowerCase();
     return log.network
       .map((e, i) => ({ e, i }))
-      .filter(({ e }) => (!failedOnly || isFailed(e)) && (!q || e.url.toLowerCase().includes(q)));
-  }, [log, failedOnly, query]);
+      .filter(({ e }) => inFilter(e, types) && (!failedOnly || isFailed(e)) && (!q || e.url.toLowerCase().includes(q)));
+  }, [log, failedOnly, query, types]);
 
   if (error) return <p className="text-sm text-muted">The log couldn&apos;t be loaded.</p>;
   if (!log) return <div className="h-32 animate-pulse rounded-xl bg-surface-2" />;
@@ -43,7 +45,7 @@ export function CaptureLogPanel({ logUrl, failedCount }: { logUrl: string; faile
         <div className="inline-flex rounded-lg border border-line p-0.5 text-xs" role="tablist">
           {(
             [
-              ["network", `API calls ${log.network.length}`],
+              ["network", `Network ${log.network.length}`],
               ["console", `Console ${consoleCount}`],
             ] as const
           ).map(([key, label]) => (
@@ -81,10 +83,33 @@ export function CaptureLogPanel({ logUrl, failedCount }: { logUrl: string; faile
         )}
       </div>
 
+      {tab === "network" && (
+        // Request types, as in DevTools. Types with nothing recorded stay clickable but quiet.
+        <div className="flex flex-wrap gap-1 border-b border-line px-3 py-1.5" role="toolbar" aria-label="Request types">
+          {NETWORK_FILTERS.map((f) => {
+            const n = log.network.filter((e) => inFilter(e, f.id)).length;
+            return (
+              <button
+                key={f.id}
+                type="button"
+                aria-pressed={types === f.id}
+                onClick={() => setTypes(f.id)}
+                title={`${n} ${n === 1 ? "request" : "requests"}`}
+                className={`rounded px-2 py-0.5 text-xs font-medium ${
+                  types === f.id ? "bg-surface-2 text-foreground ring-1 ring-line" : `text-muted hover:text-foreground ${n ? "" : "opacity-50"}`
+                }`}
+              >
+                {f.label}
+              </button>
+            );
+          })}
+        </div>
+      )}
+
       {tab === "network" ? (
         rows.length === 0 ? (
           <p className="px-4 py-8 text-center text-sm text-muted">
-            {log.network.length === 0 ? "No API calls were recorded." : "No calls match."}
+            {log.network.length === 0 ? "No requests were recorded." : "No requests match these filters."}
           </p>
         ) : (
           <ul className="max-h-[32rem] divide-y divide-line overflow-y-auto">
@@ -94,18 +119,23 @@ export function CaptureLogPanel({ logUrl, failedCount }: { logUrl: string; faile
                   type="button"
                   onClick={() => setOpen(open === i ? null : i)}
                   aria-expanded={open === i}
-                  className="grid w-full grid-cols-[3.25rem_3.5rem_1fr_auto] items-center gap-3 px-3 py-2 text-left text-xs hover:bg-surface-2"
+                  className="grid w-full grid-cols-[3.25rem_4.75rem_1fr_auto] items-center gap-3 px-3 py-2 text-left text-xs hover:bg-surface-2"
                 >
                   <StatusPill entry={e} />
-                  <span className="font-mono font-medium">{e.method}</span>
+                  {e.type === "fetch" || e.type === "xhr" ? (
+                    <span className="font-mono font-medium">{e.method}</span>
+                  ) : (
+                    <span className="font-mono text-muted">{TYPE_LABEL[e.type] ?? e.type}</span>
+                  )}
                   <span className="min-w-0 truncate font-mono" title={e.url}>
                     <UrlText url={e.url} />
                   </span>
                   <span className="whitespace-nowrap text-muted tabular-nums">
+                    {e.sizeBytes ? `${formatSize(e.sizeBytes)} · ` : ""}
                     {Math.round(e.durationMs)} ms · +{((e.startedAt - start) / 1000).toFixed(1)}s
                   </span>
                 </button>
-                {open === i && <EntryDetails entry={e} />}
+                {open === i && (hasDetails(e) ? <EntryDetails entry={e} /> : <ResourceDetails entry={e} />)}
               </li>
             ))}
           </ul>
@@ -137,17 +167,70 @@ export function CaptureLogPanel({ logUrl, failedCount }: { logUrl: string; faile
   );
 }
 
+/** Short type label for files, like DevTools' Type column; API calls show their method instead. */
+const TYPE_LABEL: Record<string, string> = {
+  document: "Doc",
+  stylesheet: "CSS",
+  script: "JS",
+  font: "Font",
+  image: "Img",
+  media: "Media",
+  manifest: "Manifest",
+  websocket: "WS",
+  wasm: "Wasm",
+  other: "Other",
+};
+
+function formatSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(bytes < 10 * 1024 ? 1 : 0)} kB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
+const hasDetails = (e: NetworkEntry) =>
+  Boolean(e.requestBody || e.responseBody || Object.keys(e.requestHeaders ?? {}).length || Object.keys(e.responseHeaders ?? {}).length);
+
 function StatusPill({ entry: e }: { entry: NetworkEntry }) {
   const failed = isFailed(e);
+  // A file's status is 0 when the browser didn't report it (cross-origin); that isn't a failure.
+  const unknown = !e.status && !failed;
   return (
     <span
       className={`rounded px-1.5 py-0.5 text-center font-mono font-semibold ${
-        failed ? "bg-red-100 text-red-800" : e.status >= 300 ? "bg-amber-100 text-amber-800" : "bg-emerald-100 text-emerald-800"
+        failed
+          ? "bg-red-100 text-red-800"
+          : unknown
+            ? "bg-surface-2 text-muted"
+            : e.status >= 300 && e.status !== 304
+              ? "bg-amber-100 text-amber-800"
+              : "bg-emerald-100 text-emerald-800"
       }`}
-      title={e.error ?? e.statusText}
+      title={e.error ?? e.statusText ?? (unknown ? "Status not reported by the browser" : undefined)}
     >
-      {e.status || "ERR"}
+      {e.status || (failed ? "ERR" : "—")}
     </span>
+  );
+}
+
+/** Files and sockets have no headers or bodies, just what the browser reported about them. */
+function ResourceDetails({ entry: e }: { entry: NetworkEntry }) {
+  const rows: [string, string][] = [
+    ["Type", TYPE_LABEL[e.type] ?? e.type],
+    ["URL", e.url],
+    ["Status", e.status ? `${e.status}${e.statusText ? ` ${e.statusText}` : ""}` : "Not reported by the browser"],
+    ...(e.sizeBytes ? ([["Size", formatSize(e.sizeBytes)]] as [string, string][]) : []),
+    ["Time", `${Math.round(e.durationMs)} ms`],
+    ...(e.error ? ([["Error", e.error]] as [string, string][]) : []),
+  ];
+  return (
+    <dl className="grid gap-x-4 gap-y-1 border-t border-line bg-surface-2/50 px-3 py-3 text-xs sm:grid-cols-[5rem_1fr]">
+      {rows.map(([k, v]) => (
+        <div key={k} className="contents">
+          <dt className="text-muted">{k}</dt>
+          <dd className={`min-w-0 break-all ${k === "URL" ? "font-mono" : ""}`}>{v}</dd>
+        </div>
+      ))}
+    </dl>
   );
 }
 
@@ -180,45 +263,80 @@ function pretty(body: string): string {
   }
 }
 
+type DetailTab = "requestHeaders" | "responseHeaders" | "requestBody" | "responseBody";
+
+const headerText = (headers: Record<string, string>) =>
+  Object.entries(headers)
+    .map(([k, v]) => `${k}: ${v}`)
+    .join("\n");
+
+/** One call's headers and bodies, a tab each. Opens on the response body, where the error usually is. */
 function EntryDetails({ entry: e }: { entry: NetworkEntry }) {
+  const requestHeaders = Object.entries(e.requestHeaders ?? {});
+  const responseHeaders = Object.entries(e.responseHeaders ?? {});
+  const tabs: { id: DetailTab; label: string; count?: number; empty: boolean }[] = [
+    { id: "requestHeaders", label: "Request headers", count: requestHeaders.length, empty: requestHeaders.length === 0 },
+    { id: "responseHeaders", label: "Response headers", count: responseHeaders.length, empty: responseHeaders.length === 0 },
+    { id: "requestBody", label: "Request body", empty: !e.requestBody },
+    { id: "responseBody", label: "Response body", empty: !e.responseBody },
+  ];
+  const [tab, setTab] = useState<DetailTab>(e.responseBody ? "responseBody" : (tabs.find((t) => !t.empty)?.id ?? "requestHeaders"));
+  const content =
+    tab === "requestHeaders"
+      ? headerText(e.requestHeaders ?? {})
+      : tab === "responseHeaders"
+        ? headerText(e.responseHeaders ?? {})
+        : pretty((tab === "requestBody" ? e.requestBody : e.responseBody) ?? "");
+  const headers = tab === "requestHeaders" ? requestHeaders : tab === "responseHeaders" ? responseHeaders : null;
+  const { state, copy } = useCopy(content);
+
   return (
     <div className="space-y-3 border-t border-line bg-surface-2/50 px-3 py-3 text-xs">
-      <p className="break-all font-mono">
-        <span className="font-semibold">{e.method}</span> {e.url}
-      </p>
       {e.error && <p className="text-red-800">Error: {e.error}</p>}
-      <div className="grid gap-3 lg:grid-cols-2">
-        <Block title="Request headers" headers={e.requestHeaders} />
-        <Block title="Response headers" headers={e.responseHeaders} />
-        <Block title="Request body" body={e.requestBody} />
-        <Block title="Response body" body={e.responseBody} />
+
+      <div className="overflow-hidden rounded-lg border border-line bg-surface">
+        <div className="flex items-center gap-2 border-b border-line pr-2">
+          <div className="flex min-w-0 flex-1 overflow-x-auto overflow-y-hidden px-1" role="tablist" aria-label="Call details">
+            {tabs.map((t) => (
+              <button
+                key={t.id}
+                type="button"
+                role="tab"
+                aria-selected={tab === t.id}
+                onClick={() => setTab(t.id)}
+                className={`-mb-px shrink-0 whitespace-nowrap border-b-2 px-2.5 py-2 font-medium transition ${
+                  tab === t.id ? "border-accent text-foreground" : `border-transparent hover:text-foreground ${t.empty ? "text-muted/60" : "text-muted"}`
+                }`}
+              >
+                {t.label}
+                {t.count ? <span className="ml-1 font-normal text-muted">{t.count}</span> : null}
+              </button>
+            ))}
+          </div>
+          {content && (
+            <button type="button" onClick={copy} className="shrink-0 rounded-md border border-line px-2 py-1 font-medium hover:border-accent">
+              {state === "copied" ? "Copied" : state === "failed" ? "Couldn't copy" : "Copy"}
+            </button>
+          )}
+        </div>
+
+        <div role="tabpanel" className="max-h-80 overflow-auto p-3">
+          {!content ? (
+            <p className="text-muted">{headers ? "No headers were recorded." : "No body was sent."}</p>
+          ) : headers ? (
+            <dl className="space-y-1 font-mono">
+              {headers.map(([k, v]) => (
+                <div key={k} className="break-all">
+                  <dt className="inline text-muted">{k}: </dt>
+                  <dd className="inline">{v}</dd>
+                </div>
+              ))}
+            </dl>
+          ) : (
+            <pre className="whitespace-pre-wrap break-all font-mono">{content}</pre>
+          )}
+        </div>
       </div>
     </div>
-  );
-}
-
-function Block({ title, headers, body }: { title: string; headers?: Record<string, string>; body?: string }) {
-  const entries = headers ? Object.entries(headers) : [];
-  const empty = headers ? entries.length === 0 : !body;
-  return (
-    <section className="min-w-0">
-      <h4 className="mb-1 font-semibold text-muted">{title}</h4>
-      {empty ? (
-        <p className="text-muted">—</p>
-      ) : headers ? (
-        <dl className="space-y-0.5 font-mono">
-          {entries.map(([k, v]) => (
-            <div key={k} className="break-all">
-              <dt className="inline text-muted">{k}: </dt>
-              <dd className="inline">{v}</dd>
-            </div>
-          ))}
-        </dl>
-      ) : (
-        <pre className="max-h-64 overflow-auto rounded-md border border-line bg-surface p-2 font-mono whitespace-pre-wrap break-all">
-          {pretty(body!)}
-        </pre>
-      )}
-    </section>
   );
 }

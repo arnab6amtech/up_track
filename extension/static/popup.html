@@ -10,7 +10,16 @@
     <header class="head">
       <span class="logo">U</span>
       <strong>UpTrack</strong>
-      <button type="button" id="open-settings" class="btn btn-sm head-settings" hidden>Settings</button>
+      <button type="button" id="open-home" class="btn btn-sm btn-icon head-home" title="Open the bug list" aria-label="Open the bug list" hidden>
+        <svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+          <path
+            fill-rule="evenodd"
+            d="M9.293 2.293a1 1 0 0 1 1.414 0l7 7A1 1 0 0 1 17 11h-1v6a1 1 0 0 1-1 1h-3a1 1 0 0 1-1-1v-3H9v3a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-6H3a1 1 0 0 1-.707-1.707l7-7Z"
+            clip-rule="evenodd"
+          />
+        </svg>
+      </button>
+      <button type="button" id="open-settings" class="btn btn-sm" hidden>Settings</button>
     </header>
 
     <section id="setup" class="body" hidden>
@@ -48,7 +57,7 @@
       </button>
       <p id="restricted" class="notice" hidden>Chrome doesn't allow capturing this page. Switch to the site you're testing.</p>
       <p id="action-error" class="error" hidden></p>
-      <p class="small muted foot">Each report includes the page's API calls and console errors.<br /><span id="connected"></span></p>
+      <p class="small muted foot" id="connected"></p>
       <p id="token-note" class="notice" hidden>The API token in Settings no longer works, so your browser sign-in is used. Clear it in Settings.</p>
     </section>
 

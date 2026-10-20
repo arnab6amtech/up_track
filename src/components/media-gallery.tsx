@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { MediaLink } from "@/lib/types";
 
 /** `stacked` keeps one column, for narrow places like the details sidebar and the drawer. */
@@ -82,16 +82,7 @@ function MediaView({ item, onZoom }: { item: MediaLink; onZoom: (src: string) =>
         </button>
       );
     case "video":
-      return (
-        <video
-          src={item.src}
-          controls
-          playsInline
-          preload="metadata"
-          onError={() => item.kind === "probe" && setFallback("link")}
-          className="aspect-video w-full bg-black"
-        />
-      );
+      return <VideoView item={item} onError={() => item.kind === "probe" && setFallback("link")} />;
     default:
       return (
         <a
@@ -107,6 +98,92 @@ function MediaView({ item, onZoom }: { item: MediaLink; onZoom: (src: string) =>
         </a>
       );
   }
+}
+
+const clock = (ms: number) => {
+  const s = Math.floor(ms / 1000);
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+};
+
+/** A recording, with the timestamps its reporter marked in a collapsible section under it. */
+function VideoView({ item, onError }: { item: MediaLink; onError: () => void }) {
+  const video = useRef<HTMLVideoElement>(null);
+  const seek = (atMs: number, play: boolean) => {
+    const v = video.current;
+    if (!v) return;
+    v.currentTime = atMs / 1000;
+    if (play) void v.play().catch(() => {});
+    else v.pause();
+  };
+  return (
+    <>
+      <video ref={video} src={item.src} controls playsInline preload="metadata" onError={onError} className="aspect-video w-full bg-black" />
+      {item.markers?.length ? <Timestamps markers={item.markers} onSeek={seek} /> : null}
+    </>
+  );
+}
+
+/** "Timestamp" with an arrow; open, a tab per timestamp, labelled with its time. Picking one shows that moment in the video. */
+function Timestamps({ markers, onSeek }: { markers: NonNullable<MediaLink["markers"]>; onSeek: (atMs: number, play: boolean) => void }) {
+  const sorted = [...markers].sort((a, b) => a.atMs - b.atMs);
+  const [open, setOpen] = useState(false);
+  const [active, setActive] = useState(0);
+  const current = sorted[active];
+  const show = (i: number, play = false) => {
+    setActive(i);
+    onSeek(sorted[i].atMs, play);
+  };
+
+  return (
+    <div className="border-t border-line">
+      <button
+        type="button"
+        onClick={() => {
+          if (!open) show(active);
+          setOpen(!open);
+        }}
+        aria-expanded={open}
+        className="flex w-full items-center justify-between px-3 py-2.5 text-sm font-medium hover:bg-surface-2"
+      >
+        <span>
+          Timestamp <span className="font-normal text-muted">{sorted.length}</span>
+        </span>
+        <svg viewBox="0 0 20 20" fill="currentColor" className={`size-4 text-muted transition-transform ${open ? "rotate-180" : ""}`} aria-hidden>
+          <path fillRule="evenodd" d="M5.22 8.22a.75.75 0 0 1 1.06 0L10 11.94l3.72-3.72a.75.75 0 1 1 1.06 1.06l-4.25 4.25a.75.75 0 0 1-1.06 0L5.22 9.28a.75.75 0 0 1 0-1.06Z" clipRule="evenodd" />
+        </svg>
+      </button>
+      {open && (
+        <div className="px-3 pb-3">
+          <div className="flex overflow-x-auto overflow-y-hidden border-b border-line" role="tablist" aria-label="Timestamps">
+            {sorted.map((m, i) => (
+              <button
+                key={i}
+                type="button"
+                role="tab"
+                aria-selected={i === active}
+                onClick={() => show(i)}
+                className={`-mb-px shrink-0 whitespace-nowrap border-b-2 px-2.5 py-2 font-mono text-xs font-medium tabular-nums ${
+                  i === active ? "border-accent text-foreground" : "border-transparent text-muted hover:text-foreground"
+                }`}
+              >
+                {clock(m.atMs)}
+              </button>
+            ))}
+          </div>
+          <div role="tabpanel" className="flex items-start gap-3 pt-3 text-sm">
+            <p className={`min-w-0 flex-1 ${current.label ? "" : "text-muted"}`}>{current.label || "No note"}</p>
+            <button
+              type="button"
+              onClick={() => show(active, true)}
+              className="shrink-0 rounded-md border border-line px-2 py-0.5 text-xs font-medium hover:border-accent"
+            >
+              Play from here
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }
 
 function DriveView({ item, onZoom }: { item: MediaLink; onZoom: (src: string) => void }) {

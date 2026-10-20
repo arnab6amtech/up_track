@@ -24,7 +24,11 @@ import { UserError } from "../orgs";
 import {
   archiveComponent,
   createComponent,
+  createPlatform,
+  archivePlatform,
   createVersion,
+  listComponents,
+  listPlatforms,
   removeProjectMember,
   setProjectMember,
   setVersionStatus,
@@ -80,6 +84,19 @@ export async function reportBugAction(_prev: ActionState, form: FormData): Promi
     if (assigneeId) assertCan(access.permissions, "bug.assign");
 
     const ctx = await getOrgContext(org);
+    // Every new bug names the feature it's in.
+    const componentId = text(form, "componentId");
+    if (!componentId) throw new UserError("Pick the feature this bug is in.");
+    if (!(await listComponents(ctx.org.id, access.project.id)).some((c) => c.id === componentId)) {
+      throw new UserError("That feature isn't part of this project any more. Pick another.");
+    }
+    // Projects that cover several products (admin panel, website, app) also need the platform.
+    const platforms = await listPlatforms(ctx.org.id, access.project.id);
+    const platformId = text(form, "platformId");
+    if (platforms.length > 0 && !platformId) throw new UserError("Pick the platform you found it on.");
+    if (platformId && !platforms.some((p) => p.id === platformId)) {
+      throw new UserError("That platform isn't part of this project any more. Pick another.");
+    }
     const bug = await createBug(ctx.org.id, {
       projectId: access.project.id,
       reporterId: ctx.user.id,
@@ -90,7 +107,8 @@ export async function reportBugAction(_prev: ActionState, form: FormData): Promi
       actualResult: text(form, "actual"),
       environment: text(form, "environment"),
       foundInVersionId: versionId,
-      componentId: text(form, "componentId") || null,
+      componentId,
+      platformId: platformId || null,
       severity: oneOf(SEVERITIES, text(form, "severity")) ?? "medium",
       priority: oneOf(PRIORITIES, text(form, "priority")) ?? "medium",
       assigneeId: assigneeId || null,
@@ -108,9 +126,15 @@ export async function updateBugAction(_prev: ActionState, form: FormData): Promi
     const p = access.permissions;
     const bugId = text(form, "bugId");
     const db = await getDb();
-    const current = await one<{ status_id: string; assignee_id: string | null; project_id: string }>(
+    const current = await one<{
+      status_id: string;
+      assignee_id: string | null;
+      project_id: string;
+      component_id: string | null;
+      platform_id: string | null;
+    }>(
       db,
-      "select status_id, assignee_id, project_id from bugs where id = $1 and organization_id = $2",
+      "select status_id, assignee_id, project_id, component_id, platform_id from bugs where id = $1 and organization_id = $2",
       [bugId, ctx.org.id],
     );
     if (!current || current.project_id !== access.project.id) throw new UserError("That bug no longer exists.");
@@ -142,6 +166,7 @@ export async function updateBugAction(_prev: ActionState, form: FormData): Promi
       ["priority", "priority"],
       ["fixedInVersionId", "fixedInVersionId"],
       ["componentId", "componentId"],
+      ["platformId", "platformId"],
       ["title", "title"],
       ["description", "description"],
       ["stepsToReproduce", "steps"],
@@ -157,6 +182,9 @@ export async function updateBugAction(_prev: ActionState, form: FormData): Promi
       else if (key === "title") changes.title = value || undefined;
       else (changes as Record<string, string | null>)[key] = value || null;
     }
+    // A bug that names a feature keeps one (older bugs may have none).
+    if (changes.componentId === null && current.component_id) throw new UserError("A bug needs a feature. Pick one.");
+    if (changes.platformId === null && current.platform_id) throw new UserError("A bug found on a platform keeps one. Pick one.");
     const edits = editable.map(([k]) => k).filter((k) => changes[k] !== undefined);
     if (edits.length) assertCan(p, "bug.edit");
 
@@ -255,10 +283,29 @@ export async function createComponentAction(_prev: ActionState, form: FormData):
   return attempt(async () => {
     const { ctx, access } = await managed(form, "project.manage");
     const name = text(form, "name");
-    if (!name) throw new UserError("Name the module, e.g. Checkout.");
+    if (!name) throw new UserError("Name the feature, e.g. Checkout.");
     await createComponent(ctx.org.id, access.project.id, name);
     refresh();
-    return { success: `Module ${name} added.` };
+    return { success: `Feature ${name} added.` };
+  });
+}
+
+export async function createPlatformAction(_prev: ActionState, form: FormData): Promise<ActionState> {
+  return attempt(async () => {
+    const { ctx, access } = await managed(form, "project.manage");
+    const name = text(form, "name");
+    if (!name) throw new UserError("Name the platform, e.g. Admin panel.");
+    await createPlatform(ctx.org.id, access.project.id, name);
+    refresh();
+    return { success: `Platform ${name} added.` };
+  });
+}
+
+export async function archivePlatformAction(_prev: ActionState, form: FormData): Promise<ActionState> {
+  return attempt(async () => {
+    const { ctx, access } = await managed(form, "project.manage");
+    await archivePlatform(ctx.org.id, access.project.id, text(form, "platformId"));
+    refresh();
   });
 }
 

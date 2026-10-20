@@ -1,20 +1,23 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Suspense } from "react";
-import { AgentCommandBar } from "@/components/agent-command";
-import { BugPanel, CommentForm, CreateShareLink } from "@/components/bug-forms";
+import { CopyFixChip } from "@/components/agent-command";
+import { CommentForm, CreateShareLink } from "@/components/bug-forms";
+import { BugFieldSelect } from "@/components/bug-field-select";
 import { BugTextSections } from "@/components/bug-text";
-import { CaptureDetails, mediaLinks } from "@/components/capture-details";
+import { CapturedPage, CaptureLog, mediaLinks } from "@/components/capture-details";
+import { BugTabs } from "@/components/bug-tabs";
 import { ConfirmButton } from "@/components/confirm-button";
 import { LocalTime } from "@/components/local-time";
 import { MediaGallery } from "@/components/media-gallery";
 import { RichText } from "@/components/rich-text";
-import { PriorityBadge, SeverityBadge, StatusPill } from "@/components/tracker-badges";
-import { PRIORITY_LABEL, RESOLUTION_LABEL, SEVERITY_LABEL } from "@/lib/labels";
+import { StatusSelect } from "@/components/status-select";
+import { SeverityBadge, StatusPill } from "@/components/tracker-badges";
+import { PRIORITY_LABEL, RESOLUTION_LABEL, SEVERITY_LABEL, SEVERITY_TONE } from "@/lib/labels";
 import { getOrgContext, getProjectAccess } from "@/server/access";
 import { revokeShareLinkAction } from "@/server/actions/project";
 import { getBug, listActivity, listComments, listShareLinks, listStatuses, type ActivityItem } from "@/server/bugs";
-import { listComponents, listProjectMembers, listVersions } from "@/server/projects";
+import { listComponents, listPlatforms, listProjectMembers, listVersions } from "@/server/projects";
 
 export default function BugPage({ params }: PageProps<"/o/[org]/p/[key]/bugs/[number]">) {
   return (
@@ -50,9 +53,10 @@ async function Bug({ params }: Pick<PageProps<"/o/[org]/p/[key]/bugs/[number]">,
   const bug = /^\d+$/.test(number) ? await getBug(ctx.org.id, access.project.id, Number(number)) : null;
   if (!bug) notFound();
   const p = access.permissions;
-  const [statuses, versions, components, members, comments, activity, shareLinks] = await Promise.all([
+  const [statuses, versions, platforms, components, members, comments, activity, shareLinks] = await Promise.all([
     listStatuses(ctx.org.id),
     listVersions(ctx.org.id, access.project.id),
+    listPlatforms(ctx.org.id, access.project.id),
     listComponents(ctx.org.id, access.project.id),
     listProjectMembers(ctx.org.id, access.project.id),
     listComments(ctx.org.id, bug.id),
@@ -63,6 +67,29 @@ async function Bug({ params }: Pick<PageProps<"/o/[org]/p/[key]/bugs/[number]">,
   const base = `/o/${org}/p/${bug.projectKey}`;
   const media = mediaLinks(bug.attachments);
   const editor = { org, project: bug.projectKey, bugId: bug.id, lockVersion: bug.lockVersion };
+  const canEdit = p.has("bug.edit");
+  const canAssign = p.has("bug.assign");
+  // Each field is changed in place. They remount after a save (keyed by lock version) to show the stored value.
+  const field = (name: string, label: string, value: string, options: { value: string; label: string }[], variant: "pill" | "inline", tones?: Record<string, string>) => (
+    <BugFieldSelect key={`${name}-${bug.lockVersion}`} {...editor} field={name} label={label} value={value} options={options} variant={variant} tones={tones} />
+  );
+  const labelled = (labels: Record<string, string>) => Object.entries(labels).map(([value, label]) => ({ value, label }));
+  // Features and platforms that were removed can't be picked any more, but a bug that has one still shows it.
+  const withCurrent = (list: { id: string; name: string }[], id: string | null, name: string | null, removed: string) => [
+    ...(id ? [] : [{ value: "", label: "None" }]),
+    ...list.map((x) => ({ value: x.id, label: x.name })),
+    ...(id && !list.some((x) => x.id === id) ? [{ value: id, label: name ?? removed }] : []),
+  ];
+  // Without the assign permission, the only choices are keeping the current assignee or taking the bug.
+  const assignees = (canAssign ? members : members.filter((m) => m.userId === bug.assigneeId || m.userId === ctx.user.id)).map((m) => ({
+    value: m.userId,
+    label: m.userId === ctx.user.id ? `${m.fullName} (me)` : m.fullName,
+  }));
+  const assigneeOptions = [
+    ...(canAssign || !bug.assigneeId ? [{ value: "", label: "Nobody" }] : []),
+    ...assignees,
+    ...(bug.assigneeId && !assignees.some((a) => a.value === bug.assigneeId) ? [{ value: bug.assigneeId, label: bug.assigneeName ?? "Former member" }] : []),
+  ];
 
   return (
     <article className="space-y-6">
@@ -76,109 +103,146 @@ async function Bug({ params }: Pick<PageProps<"/o/[org]/p/[key]/bugs/[number]">,
       <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_380px]">
         <div className="min-w-0 space-y-4">
           <header className="space-y-3 rounded-xl border border-line bg-surface p-5">
-            <h1 className="text-lg font-semibold leading-snug tracking-tight sm:text-xl">{bug.title}</h1>
+            <div className="flex items-start gap-3">
+              <h1 className="min-w-0 text-lg font-semibold leading-snug tracking-tight sm:text-xl">{bug.title}</h1>
+              <span className="pt-0.5 sm:pt-px">
+                <CopyFixChip id={bugKey} />
+              </span>
+            </div>
             <div className="flex flex-wrap items-center gap-2">
-              <StatusPill name={bug.resolution ? `${bug.statusName} · ${RESOLUTION_LABEL[bug.resolution]}` : bug.statusName} color={bug.statusColor} />
-              <SeverityBadge value={bug.severity} />
-              <PriorityBadge value={bug.priority} />
+              {p.has("bug.change_status") ? (
+                <StatusSelect
+                  key={`status-${bug.lockVersion}`}
+                  {...editor}
+                  statusId={bug.statusId}
+                  resolution={bug.resolution}
+                  statuses={statuses.map((s) => ({ id: s.id, name: s.name, category: s.category, color: s.color }))}
+                  canVerify={p.has("bug.verify")}
+                />
+              ) : (
+                <StatusPill name={bug.resolution ? `${bug.statusName} · ${RESOLUTION_LABEL[bug.resolution]}` : bug.statusName} color={bug.statusColor} />
+              )}
+              {canEdit ? field("severity", "Severity", bug.severity, labelled(SEVERITY_LABEL), "pill", SEVERITY_TONE) : <SeverityBadge value={bug.severity} />}
             </div>
             <dl className="grid gap-x-6 gap-y-2 pt-1 text-sm sm:grid-cols-2">
               {(
                 [
                   ["Found in", bug.foundInVersionName],
-                  ["Fixed in", bug.fixedInVersionName ?? "—"],
-                  ["Module", bug.componentName ?? "—"],
-                  ["Assignee", bug.assigneeName ?? "Nobody"],
-                  ["Reported by", bug.reporterName],
-                  ["Reported", <LocalTime key="c" iso={iso(bug.createdAt)} />],
+                  [
+                    "Fixed in",
+                    canEdit
+                      ? field("fixedInVersionId", "Fixed in", bug.fixedInVersionId ?? "", [{ value: "", label: "Not yet" }, ...versions.map((v) => ({ value: v.id, label: v.name }))], "inline")
+                      : (bug.fixedInVersionName ?? "—"),
+                  ],
+                  ...(bug.platformName || platforms.length
+                    ? [
+                        [
+                          "Platform",
+                          canEdit
+                            ? field("platformId", "Platform", bug.platformId ?? "", withCurrent(platforms, bug.platformId, bug.platformName, "Removed platform"), "inline")
+                            : (bug.platformName ?? "—"),
+                        ],
+                      ]
+                    : []),
+                  [
+                    "Feature",
+                    canEdit
+                      ? field("componentId", "Feature", bug.componentId ?? "", withCurrent(components, bug.componentId, bug.componentName, "Removed feature"), "inline")
+                      : (bug.componentName ?? "—"),
+                  ],
+                  [
+                    "Assignee",
+                    canAssign || p.has("bug.change_status")
+                      ? field("assigneeId", "Assignee", bug.assigneeId ?? "", assigneeOptions, "inline")
+                      : (bug.assigneeName ?? "Nobody"),
+                  ],
+                  [
+                    "Reported",
+                    <>
+                      {bug.reporterName} <span className="text-muted">·</span> <LocalTime iso={iso(bug.createdAt)} />
+                    </>,
+                  ],
                 ] as [string, React.ReactNode][]
               ).map(([k, v]) => (
-                <div key={k} className="flex gap-2">
+                <div key={k} className="flex items-center gap-2">
                   <dt className="w-24 shrink-0 text-muted">{k}</dt>
                   <dd className="min-w-0">{v}</dd>
                 </div>
               ))}
             </dl>
-            <AgentCommandBar id={bugKey} />
           </header>
 
-          <BugTextSections
-            canEdit={p.has("bug.edit")}
-            editor={editor}
-            text={{
-              title: bug.title,
-              description: bug.description,
-              stepsToReproduce: bug.stepsToReproduce,
-              expectedResult: bug.expectedResult,
-              actualResult: bug.actualResult,
-              environment: bug.environment,
-            }}
+          <BugTabs
+            tabs={[
+              {
+                id: "report",
+                label: "Report",
+                content: (
+                  <BugTextSections
+                    heading={false}
+                    canEdit={p.has("bug.edit")}
+                    editor={editor}
+                    text={{
+                      title: bug.title,
+                      description: bug.description,
+                      stepsToReproduce: bug.stepsToReproduce,
+                      expectedResult: bug.expectedResult,
+                      actualResult: bug.actualResult,
+                      environment: bug.environment,
+                    }}
+                  />
+                ),
+              },
+              // Bugs reported with the browser extension also carry the page they came from and its API log.
+              ...(bug.capture ? [{ id: "page", label: "Captured page", content: <CapturedPage capture={bug.capture} heading={false} /> }] : []),
+              ...(bug.capture?.logAttachmentId
+                ? [{ id: "api", label: "Network & console", content: <CaptureLog capture={bug.capture} heading={false} /> }]
+                : []),
+              {
+                id: "comments",
+                label: "Comments",
+                count: comments.length,
+                content: (
+                  <div className="space-y-3">
+                    {comments.length === 0 ? (
+                      <p className="text-sm text-muted">No comments yet.</p>
+                    ) : (
+                      <ul className="space-y-3">
+                        {comments.map((c) => (
+                          <li key={c.id} className="rounded-xl border border-line bg-surface p-3">
+                            <p className="mb-1.5 text-xs text-muted">
+                              <span className="font-medium text-foreground">{c.authorName}</span> · <LocalTime iso={iso(c.createdAt)} />
+                            </p>
+                            <RichText text={c.body} />
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                    {p.has("bug.comment") && <CommentForm org={org} project={bug.projectKey} bugId={bug.id} />}
+                  </div>
+                ),
+              },
+              {
+                id: "history",
+                label: "History",
+                content: (
+                  <ol className="space-y-2 border-l border-line pl-4">
+                    {activity.map((a) => (
+                      <li key={a.id} className="text-sm">
+                        <span className="font-medium">{a.actorName ?? "UpTrack"}</span> {describeActivity(a)}{" "}
+                        <span className="text-xs text-muted">
+                          · <LocalTime iso={iso(a.createdAt)} />
+                        </span>
+                      </li>
+                    ))}
+                  </ol>
+                ),
+              },
+            ]}
           />
-
-          {bug.capture && <CaptureDetails capture={bug.capture} />}
-
-          <section className="space-y-3">
-            <h2 className="text-sm font-semibold">
-              Comments <span className="font-normal text-muted">({comments.length})</span>
-            </h2>
-            {comments.length > 0 && (
-              <ul className="space-y-3">
-                {comments.map((c) => (
-                  <li key={c.id} className="rounded-xl border border-line bg-surface p-3">
-                    <p className="mb-1.5 text-xs text-muted">
-                      <span className="font-medium text-foreground">{c.authorName}</span> · <LocalTime iso={iso(c.createdAt)} />
-                    </p>
-                    <RichText text={c.body} />
-                  </li>
-                ))}
-              </ul>
-            )}
-            {p.has("bug.comment") && <CommentForm org={org} project={bug.projectKey} bugId={bug.id} />}
-          </section>
-
-          <section className="space-y-3">
-            <h2 className="text-sm font-semibold">History</h2>
-            <ol className="space-y-2 border-l border-line pl-4">
-              {activity.map((a) => (
-                <li key={a.id} className="text-sm">
-                  <span className="font-medium">{a.actorName ?? "UpTrack"}</span> {describeActivity(a)}{" "}
-                  <span className="text-xs text-muted">
-                    · <LocalTime iso={iso(a.createdAt)} />
-                  </span>
-                </li>
-              ))}
-            </ol>
-          </section>
         </div>
 
         <aside className="space-y-5 lg:sticky lg:top-20">
-          <section className="rounded-xl border border-line bg-surface p-4">
-            <h2 className="mb-3 text-sm font-semibold">Details</h2>
-            <BugPanel
-              {...editor}
-              currentUserId={ctx.user.id}
-              statuses={statuses.map((s) => ({ id: s.id, name: s.name, category: s.category }))}
-              versions={versions.map((v) => ({ id: v.id, name: v.name }))}
-              components={components.map((c) => ({ id: c.id, name: c.name }))}
-              members={members.map((m) => ({ id: m.userId, name: m.fullName }))}
-              bug={{
-                statusId: bug.statusId,
-                resolution: bug.resolution,
-                assigneeId: bug.assigneeId,
-                severity: bug.severity,
-                priority: bug.priority,
-                fixedInVersionId: bug.fixedInVersionId,
-                componentId: bug.componentId,
-              }}
-              can={{
-                changeStatus: p.has("bug.change_status"),
-                verify: p.has("bug.verify"),
-                assign: p.has("bug.assign"),
-                edit: p.has("bug.edit"),
-              }}
-            />
-          </section>
-
           <section className="space-y-3">
             <h2 className="text-sm font-semibold">
               Reference <span className="font-normal text-muted">({media.length})</span>

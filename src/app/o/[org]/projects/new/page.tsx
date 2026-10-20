@@ -26,7 +26,7 @@ async function Content({ params }: Pick<PageProps<"/o/[org]/projects/new">, "par
       </Link>
       <div>
         <h1 className="text-xl font-semibold tracking-tight">New project</h1>
-        <p className="mt-1 text-sm text-muted">You&apos;ll be its manager. Add versions, modules and teammates in its settings.</p>
+        <p className="mt-1 text-sm text-muted">You&apos;ll be its manager. Add versions, features and teammates in its settings.</p>
       </div>
       <div className="rounded-xl border border-line bg-surface p-5">
         <NewProjectForm org={ctx.org.slug} />

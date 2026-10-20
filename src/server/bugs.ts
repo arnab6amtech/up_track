@@ -9,6 +9,7 @@ import {
   type PageInfo,
   type Priority,
   type Severity,
+  type VideoMarker,
 } from "@/lib/capture-types";
 import { newToken, sha256 } from "./auth/crypto";
 import { getDb, inOrg, one, type Queryable } from "./db";
@@ -48,11 +49,13 @@ export interface BugFilters {
   status?: string;
   version?: string;
   component?: string;
+  /** A platform id, or "none" for bugs without one. */
+  platform?: string;
   /** A user id, "me" or "none". */
   assignee?: string;
   severity?: string;
   priority?: string;
-  sort?: "updated" | "created" | "priority";
+  sort?: "updated" | "created" | "severity";
   page?: number;
 }
 
@@ -60,6 +63,7 @@ export interface BugListItem {
   id: string;
   number: number;
   title: string;
+  statusId: string;
   statusName: string;
   statusCategory: string;
   statusColor: string | null;
@@ -69,16 +73,29 @@ export interface BugListItem {
   assigneeName: string | null;
   versionName: string;
   componentName: string | null;
-  attachmentCount: number;
-  firstImageId: string | null;
+  platformId: string | null;
+  platformName: string | null;
+  /** Screenshots and recordings, oldest first, for the list's reference column. */
+  media: ListMedia[];
   hasCapture: boolean;
+  /** For saving changes made in the list (the status). */
+  lockVersion: number;
   createdAt: Date;
   updatedAt: Date;
 }
 
+export type ListMedia = Pick<Attachment, "id" | "kind" | "fileName" | "trimStartMs" | "trimEndMs">;
+
 export const BUGS_PAGE_SIZE = 50;
 
-export async function listBugs(orgId: string, projectId: string, userId: string, f: BugFilters): Promise<{ items: BugListItem[]; total: number }> {
+export interface BugList {
+  items: BugListItem[];
+  total: number;
+  /** Bugs matching every filter except the platform, per platform (null: no platform), for the list's tabs. */
+  platformCounts: { platformId: string | null; n: number }[];
+}
+
+export async function listBugs(orgId: string, projectId: string, userId: string, f: BugFilters): Promise<BugList> {
   const params: unknown[] = [projectId];
   const where = ["b.project_id = $1", "b.deleted_at is null"];
   const add = (sql: string, value: unknown) => {
@@ -106,24 +123,29 @@ export async function listBugs(orgId: string, projectId: string, userId: string,
   else if (f.assignee) add("b.assignee_id = ?::uuid", f.assignee);
   if (f.severity && (SEVERITIES as readonly string[]).includes(f.severity)) add("b.severity = ?::bug_severity", f.severity);
   if (f.priority && (PRIORITIES as readonly string[]).includes(f.priority)) add("b.priority = ?::bug_priority", f.priority);
+  // The tabs count bugs per platform under all the other filters.
+  const tabWhere = where.join(" and ");
+  const tabParams = [...params];
+  if (f.platform === "none") where.push("b.platform_id is null");
+  else if (f.platform) add("b.platform_id = ?::uuid", f.platform);
 
   const order =
-    f.sort === "created" ? "b.number desc" : f.sort === "priority" ? "b.priority, b.severity, b.updated_at desc" : "b.updated_at desc";
+    f.sort === "created" ? "b.number desc" : f.sort === "severity" ? "b.severity, b.updated_at desc" : "b.updated_at desc";
   const page = Math.max(1, f.page ?? 1);
   const whereSql = where.join(" and ");
 
   return inOrg(orgId, async (tx) => {
-    const items = await tx.query<BugListItem>(
-      `select b.id, b.number, b.title, s.name as "statusName", s.category as "statusCategory", s.color as "statusColor",
+    const rows = await tx.query<Omit<BugListItem, "media">>(
+      `select b.id, b.number, b.title, b.status_id as "statusId", s.name as "statusName", s.category as "statusCategory", s.color as "statusColor",
               b.severity, b.priority, b.resolution, a.full_name as "assigneeName", v.name as "versionName", c.name as "componentName",
-              (select count(*)::int from bug_attachments x where x.bug_id = b.id and x.deleted_at is null and x.kind <> 'log') as "attachmentCount",
-              (select x.id from bug_attachments x where x.bug_id = b.id and x.deleted_at is null and x.kind = 'image' order by x.created_at limit 1) as "firstImageId",
+              b.platform_id as "platformId", pl.name as "platformName",
               exists (select 1 from bug_captures bc where bc.bug_id = b.id) as "hasCapture",
-              b.created_at as "createdAt", b.updated_at as "updatedAt"
+              b.lock_version as "lockVersion", b.created_at as "createdAt", b.updated_at as "updatedAt"
          from bugs b
          join workflow_statuses s on s.id = b.status_id
          join project_versions v on v.id = b.found_in_version_id
          left join project_components c on c.id = b.component_id
+         left join project_platforms pl on pl.id = b.platform_id
          left join users a on a.id = b.assignee_id
         where ${whereSql}
         order by ${order}
@@ -135,7 +157,24 @@ export async function listBugs(orgId: string, projectId: string, userId: string,
       `select count(*)::int as n from bugs b join workflow_statuses s on s.id = b.status_id where ${whereSql}`,
       params,
     );
-    return { items, total: total?.n ?? 0 };
+    const media = rows.length
+      ? await tx.query<ListMedia & { bugId: string }>(
+          `select bug_id as "bugId", id, kind, file_name as "fileName", trim_start_ms as "trimStartMs", trim_end_ms as "trimEndMs"
+             from bug_attachments
+            where bug_id = any($1::uuid[]) and deleted_at is null and kind in ('image', 'video')
+            order by created_at`,
+          [rows.map((r) => r.id)],
+        )
+      : [];
+    const items = rows.map((r) => ({ ...r, media: media.filter((m) => m.bugId === r.id) }));
+    const platformCounts = await tx.query<{ platformId: string | null; n: number }>(
+      `select b.platform_id as "platformId", count(*)::int as n
+         from bugs b join workflow_statuses s on s.id = b.status_id
+        where ${tabWhere}
+        group by b.platform_id`,
+      tabParams,
+    );
+    return { items, total: total?.n ?? 0, platformCounts };
   });
 }
 
@@ -152,6 +191,8 @@ export interface Attachment {
   durationMs: number | null;
   trimStartMs: number | null;
   trimEndMs: number | null;
+  /** Moments the reporter marked in a recording. */
+  markers: VideoMarker[] | null;
   createdAt: Date;
 }
 
@@ -199,6 +240,8 @@ export interface BugDetail {
   fixedInVersionName: string | null;
   componentId: string | null;
   componentName: string | null;
+  platformId: string | null;
+  platformName: string | null;
   reporterId: string;
   reporterName: string;
   assigneeId: string | null;
@@ -220,6 +263,7 @@ const DETAIL_SQL = `
          b.found_in_version_id as "foundInVersionId", fv.name as "foundInVersionName",
          b.fixed_in_version_id as "fixedInVersionId", xv.name as "fixedInVersionName",
          b.component_id as "componentId", c.name as "componentName",
+         b.platform_id as "platformId", pl.name as "platformName",
          b.reporter_id as "reporterId", ru.full_name as "reporterName", b.assignee_id as "assigneeId", au.full_name as "assigneeName",
          b.source, b.lock_version as "lockVersion", b.resolved_at as "resolvedAt", b.created_at as "createdAt", b.updated_at as "updatedAt"
     from bugs b
@@ -228,13 +272,15 @@ const DETAIL_SQL = `
     join project_versions fv on fv.id = b.found_in_version_id
     left join project_versions xv on xv.id = b.fixed_in_version_id
     left join project_components c on c.id = b.component_id
+    left join project_platforms pl on pl.id = b.platform_id
     join users ru on ru.id = b.reporter_id
     left join users au on au.id = b.assignee_id`;
 
 async function loadExtras(tx: Queryable, bug: Omit<BugDetail, "attachments" | "capture">): Promise<BugDetail> {
   const attachments = await tx.query<Attachment>(
     `select id, kind, file_name as "fileName", content_type as "contentType", size_bytes::int as "sizeBytes", width, height,
-            duration_ms as "durationMs", trim_start_ms as "trimStartMs", trim_end_ms as "trimEndMs", created_at as "createdAt"
+            duration_ms as "durationMs", trim_start_ms as "trimStartMs", trim_end_ms as "trimEndMs",
+            markers, created_at as "createdAt"
        from bug_attachments where bug_id = $1 and deleted_at is null order by created_at`,
     [bug.id],
   );
@@ -278,6 +324,8 @@ export interface NewAttachment {
   durationMs?: number;
   trimStartMs?: number;
   trimEndMs?: number;
+  /** Moments the reporter marked in a recording. */
+  markers?: VideoMarker[];
 }
 
 export interface NewBug {
@@ -291,6 +339,7 @@ export interface NewBug {
   environment?: string;
   foundInVersionId: string;
   componentId?: string | null;
+  platformId?: string | null;
   severity?: Severity;
   priority?: Priority;
   assigneeId?: string | null;
@@ -329,9 +378,9 @@ export async function createBug(orgId: string, input: NewBug): Promise<{ id: str
         tx,
         `insert into bugs (organization_id, project_id, title, description, steps_to_reproduce, expected_result, actual_result,
                            environment, found_in_version_id, component_id, severity, priority, reporter_id, assignee_id, source,
-                           external_ref, created_at, updated_at)
+                           external_ref, created_at, updated_at, platform_id)
          values ($1, $2, $3, nullif($4, ''), nullif($5, ''), nullif($6, ''), nullif($7, ''), nullif($8, ''), $9, $10,
-                 $11::bug_severity, $12::bug_priority, $13, $14, $15::bug_source, $16, coalesce($17, now()), coalesce($17, now()))
+                 $11::bug_severity, $12::bug_priority, $13, $14, $15::bug_source, $16, coalesce($17, now()), coalesce($17, now()), $18)
          returning id, number`,
         [
           orgId,
@@ -351,6 +400,7 @@ export async function createBug(orgId: string, input: NewBug): Promise<{ id: str
           input.source ?? "manual",
           input.externalRef ?? null,
           input.createdAt ?? null,
+          input.platformId || null,
         ],
       );
       const { id: bugId } = bug!;
@@ -373,11 +423,12 @@ export async function createBug(orgId: string, input: NewBug): Promise<{ id: str
         const row = await one<{ id: string }>(
           tx,
           `insert into bug_attachments (organization_id, bug_id, kind, storage_key, file_name, content_type, size_bytes,
-                                        width, height, duration_ms, trim_start_ms, trim_end_ms, uploaded_by)
-           values ($1, $2, $3::attachment_kind, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) returning id`,
+                                        width, height, duration_ms, trim_start_ms, trim_end_ms, uploaded_by, markers)
+           values ($1, $2, $3::attachment_kind, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14::jsonb) returning id`,
           [orgId, bugId, file.kind, key, file.fileName.slice(0, 255), file.contentType, file.bytes.byteLength,
            file.width ?? null, file.height ?? null, file.durationMs != null ? Math.round(file.durationMs) : null,
-           file.trimStartMs ?? null, file.trimEndMs ?? null, input.reporterId],
+           file.trimStartMs ?? null, file.trimEndMs ?? null, input.reporterId,
+           file.markers?.length ? JSON.stringify(file.markers) : null],
         );
         if (file.kind === "log") logAttachmentId = row!.id;
       }
@@ -434,6 +485,7 @@ export interface BugChanges {
   assigneeId?: string | null;
   fixedInVersionId?: string | null;
   componentId?: string | null;
+  platformId?: string | null;
 }
 
 const COLUMNS: Record<keyof BugChanges, { column: string; cast?: string; label: string }> = {
@@ -449,7 +501,8 @@ const COLUMNS: Record<keyof BugChanges, { column: string; cast?: string; label: 
   priority: { column: "priority", cast: "bug_priority", label: "priority" },
   assigneeId: { column: "assignee_id", cast: "uuid", label: "assignee" },
   fixedInVersionId: { column: "fixed_in_version_id", cast: "uuid", label: "fixed in" },
-  componentId: { column: "component_id", cast: "uuid", label: "module" },
+  componentId: { column: "component_id", cast: "uuid", label: "feature" },
+  platformId: { column: "platform_id", cast: "uuid", label: "platform" },
 };
 
 /**
@@ -477,6 +530,7 @@ export async function updateBug(orgId: string, bugId: string, actorId: string, l
       assigneeId: before.assigneeId,
       fixedInVersionId: before.fixedInVersionId,
       componentId: before.componentId,
+      platformId: before.platformId,
     };
     const changed = (Object.keys(changes) as (keyof BugChanges)[]).filter(
       (k) => changes[k] !== undefined && (changes[k] || null) !== (current[k] || null),
@@ -497,6 +551,7 @@ export async function updateBug(orgId: string, bugId: string, actorId: string, l
       assigneeId: [before.assigneeName, after.assigneeName],
       fixedInVersionId: [before.fixedInVersionName, after.fixedInVersionName],
       componentId: [before.componentName, after.componentName],
+      platformId: [before.platformName, after.platformName],
     };
     // The status trigger may clear the resolution on reopen; record what actually happened.
     if (before.resolution !== after.resolution && !changed.includes("resolution")) changed.push("resolution");
@@ -554,7 +609,9 @@ export interface ActivityItem {
 export async function listActivity(orgId: string, bugId: string): Promise<ActivityItem[]> {
   return inOrg(orgId, (tx) =>
     tx.query<ActivityItem>(
-      `select a.id::int, u.full_name as "actorName", a.action, a.field, a.old_value as "oldValue", a.new_value as "newValue",
+      // Features were called modules before; older history rows say so.
+      `select a.id::int, u.full_name as "actorName", a.action,
+              case a.field when 'module' then 'feature' else a.field end as field, a.old_value as "oldValue", a.new_value as "newValue",
               a.created_at as "createdAt"
          from bug_activity a left join users u on u.id = a.actor_id
         where a.bug_id = $1 order by a.created_at desc, a.id desc limit 100`,

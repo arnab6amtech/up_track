@@ -33,6 +33,9 @@ body {
   font-variant-ligatures: none;
 }
 
-select {
-  background-color: var(--surface);
+/* In the base layer so a utility class (a colored pill, say) can still set a select's background. */
+@layer base {
+  select {
+    background-color: var(--surface);
+  }
 }

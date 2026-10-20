@@ -17,25 +17,34 @@ export function BugTextSections({
   text,
   canEdit,
   editor,
+  heading = true,
 }: {
   text: BugText;
   canEdit: boolean;
   editor: { org: string; project: string; bugId: string; lockVersion: number };
+  /** Off inside the bug page's tabs, where the tab already says "Report". */
+  heading?: boolean;
 }) {
   const [editing, setEditing] = useState(false);
   if (editing) return <BugTextEditor {...editor} text={text} onDone={() => setEditing(false)} />;
 
   const filled = SECTIONS.filter(([key]) => text[key]);
+  const edit = canEdit && (
+    <button type="button" onClick={() => setEditing(true)} className="rounded-md border border-line px-2.5 py-1 text-xs font-medium hover:border-accent">
+      Edit
+    </button>
+  );
   return (
-    <section className="space-y-3 rounded-xl border border-line bg-surface p-4">
-      <div className="flex items-center justify-between">
-        <h2 className="text-xs font-semibold uppercase tracking-wide text-muted">Report</h2>
-        {canEdit && (
-          <button type="button" onClick={() => setEditing(true)} className="rounded-md border border-line px-2.5 py-1 text-xs font-medium hover:border-accent">
-            Edit
-          </button>
-        )}
-      </div>
+    <section className="relative space-y-3 rounded-xl border border-line bg-surface p-4">
+      {heading ? (
+        <div className="flex items-center justify-between">
+          <h2 className="text-xs font-semibold uppercase tracking-wide text-muted">Report</h2>
+          {edit}
+        </div>
+      ) : (
+        // Without a heading row, Edit sits in the corner beside the first line.
+        edit && <div className="float-right ml-3">{edit}</div>
+      )}
       {filled.length === 0 ? (
         <p className="text-sm text-muted">No description yet.</p>
       ) : (

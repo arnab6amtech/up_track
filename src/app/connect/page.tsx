@@ -9,11 +9,11 @@ export const metadata = { title: "Connect your agent — UpTrack" };
 
 const TOOLS: [string, string][] = [
   ["list_projects", "Projects you can see, with open bug counts and active versions."],
-  ["search_bugs", "Find bugs by project, version, module, status, assignee, severity or text; open_only for work that's left."],
+  ["search_bugs", "Find bugs by project, version, feature, status, assignee, severity or text; open_only for work that's left."],
   ["get_bug", "The full report: steps, expected and actual result, versions, people, failed API calls and comments."],
   ["get_bug_reference", "The bug's screenshots as images the agent can look at."],
   ["get_bug_logs", "Full API requests, responses and console errors for bugs reported with the extension."],
-  ["get_summary", "Open bugs by project, severity, assignee and module."],
+  ["get_summary", "Open bugs by project, severity, assignee and feature."],
   ["list_workbooks", "Older QA spreadsheets; pass workbook=… to the tools above to read them."],
 ];
 
@@ -102,7 +102,7 @@ async function Setup() {
         <CopyBlock
           label="examples"
           code={[
-            "What's still open? Group it by module.",
+            "What's still open? Group it by feature.",
             "Fix UPT-12. Look at the screenshot first.",
             "Is the login timeout bug already fixed in this repo?",
           ].join("\n")}

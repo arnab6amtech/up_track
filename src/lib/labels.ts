@@ -18,6 +18,15 @@ export const VERSION_STATUS_LABEL: Record<string, string> = {
   archived: "Archived",
 };
 
+/** Version statuses on a scale from grey (planned) to green (released). */
+export const VERSION_STATUS_COLOR: Record<string, string> = {
+  planned: "#94a3b8",
+  in_development: "#3b82f6",
+  in_testing: "#f59e0b",
+  released: "#16a34a",
+  archived: "#d4d4d4",
+};
+
 export const SEVERITY_TONE: Record<string, string> = {
   critical: "bg-red-100 text-red-800",
   high: "bg-orange-100 text-orange-800",
